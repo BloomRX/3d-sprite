@@ -1,0 +1,22 @@
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (o app em si não tem build; isto é só para ferramentas de apoio)
+node_modules/
+
+# Saídas geradas pelo app ao testar (sheets, zips, GIFs baixados)
+*.aseprite.json.tmp
+spriteforge-out/
