@@ -38,6 +38,7 @@ const state = {
   clips: [],
   clipIndex: -1,
   playing: false,
+  generating: false,
   clock: new THREE.Clock(),
   modelBox: new THREE.Box3(),
   modelRadius: 1,
@@ -100,6 +101,12 @@ function fitRigToModel() {
   keyLight.shadow.camera.near = r * 0.05;
   keyLight.shadow.camera.far = r * 12;
   keyLight.shadow.camera.updateProjectionMatrix();
+  keyLight.target.position.set(
+    (state.modelBox.min.x + state.modelBox.max.x) / 2,
+    (state.modelBox.min.y + state.modelBox.max.y) / 2,
+    (state.modelBox.min.z + state.modelBox.max.z) / 2
+  );
+  keyLight.target.updateMatrixWorld();
   ground.scale.set(r * 6, r * 6, 1);
   ground.position.set(
     (state.modelBox.min.x + state.modelBox.max.x) / 2,
@@ -134,9 +141,11 @@ function framePreview() {
   previewCamera.updateProjectionMatrix();
 }
 
-let rafId = 0;
 function tick() {
-  rafId = requestAnimationFrame(tick);
+  requestAnimationFrame(tick);
+  // Durante a geração o gerador é dono do mixer e do modelo: o preview não pode
+  // avançar a animação nem mexer na rotação entre dois renders.
+  if (state.generating) return;
   const dt = state.clock.getDelta();
   if (state.mixer && state.playing) {
     state.mixer.update(dt);
@@ -302,6 +311,152 @@ el.rngCell.addEventListener('input', () => { el.cellVal.textContent = `${el.rngC
 el.rngFps.addEventListener('input', () => { el.fpsVal.textContent = el.rngFps.value; });
 el.rngZoom.addEventListener('input', () => { el.zoomVal.textContent = `${el.rngZoom.value}x`; drawPlayer(); });
 
+
+/* ================================================================== *
+ * 6. Geração da spritesheet (auto-fit + SSAA)
+ * ================================================================== */
+
+// Renderer dedicado à geração. O canvas do viewport não pode ser redimensionado
+// para o tamanho da célula sem deformar o preview, então a sheet sai de um
+// segundo contexto — que reutiliza a MESMA cena (mesmo rig de luz, mesmo chão).
+// preserveDrawingBuffer é obrigatório para o drawImage() depois do render.
+const sheetRenderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true, antialias: true });
+sheetRenderer.setPixelRatio(1);
+sheetRenderer.shadowMap.enabled = true;
+sheetRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+sheetRenderer.toneMapping = THREE.NoToneMapping;
+
+const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
+const showProgress = (on) => el.progressWrap.classList.toggle('on', on);
+const setProgress = (ratio, label) => {
+  el.progressBar.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+  el.progressLabel.textContent = label;
+};
+
+function applyBackground(mode) {
+  if (mode === 'white') sheetRenderer.setClearColor(0xffffff, 1);
+  else if (mode === 'dark') sheetRenderer.setClearColor(0x15181d, 1);
+  else sheetRenderer.setClearColor(0x000000, 0);
+}
+
+async function generate() {
+  if (!state.model) { setStatus('carregue um modelo antes de gerar', 'err'); return; }
+  if (state.generating) return;
+
+  const dirCount = Number(el.selDirections.value);
+  const elevation = Number(el.rngElevation.value);
+  const turntable = el.chkTurntable.checked;
+  const ssaa = el.chkSsaa.checked;
+  const background = el.selBackground.value;
+  const fps = Number(el.rngFps.value) || core.DEFAULT_FPS;
+  const clip = state.clips[state.clipIndex] || null;
+
+  state.generating = true;
+  el.btnGenerate.disabled = true;
+  showProgress(true);
+  setProgress(0, 'preparando…');
+  const wasPlaying = state.playing;
+  state.playing = false;
+
+  // Posição do modelo/preview é restaurada no fim para o usuário não perder o ponto.
+  const prevRotation = state.model.rotation.y;
+  const prevTime = state.mixer ? state.mixer.time : 0;
+
+  try {
+    // 1. poses (uma por célula) e tempos de frame
+    const frameCount = clip ? Number(el.rngFrames.value) : 1;
+    const times = core.frameTimes(clip ? clip.duration : 0, frameCount, el.chkLoopPerfect.checked);
+    const poses = core.buildPoses({ directionCount: dirCount, frameCount: times.length, times, model: state.model, turntable });
+
+    const applyPose = (pose) => {
+      state.model.rotation.y = pose.modelAzimuth;
+      if (state.mixer && clip) state.mixer.setTime(pose.time);
+      state.model.updateMatrixWorld(true);
+    };
+
+    // 2. auto-fit: mede ~6 frames × 4 direções e garante que TUDO caiba na célula
+    setProgress(0.02, 'medindo enquadramento (auto-fit)…');
+    await yieldToBrowser();
+    const fit = core.measureFit(core.fitPoses(poses, { maxFrames: 6, maxDirections: 4 }), applyPose, { elevationDeg: elevation });
+    if (!fit) throw new Error('não consegui medir o modelo (geometria vazia?)');
+
+    // 3. layout (linhas = direções, colunas = frames) + clamp de 8192 px
+    const layout = core.computeLayout(dirCount, times.length, Number(el.rngCell.value));
+    if (layout.warning) setStatus(layout.warning, 'err');
+
+    // 4. canvas da sheet e renderer offscreen
+    const sheet = document.createElement('canvas');
+    sheet.width = layout.w;
+    sheet.height = layout.h;
+    const sctx = sheet.getContext('2d');
+    const renderSize = layout.cell * (ssaa ? 2 : 1);
+    sheetRenderer.setSize(renderSize, renderSize, false);
+    applyBackground(background);
+    ground.visible = el.chkShadow.checked;
+
+    const camera = core.createOrthoCamera({ half: fit.half, center: fit.center, elevationDeg: elevation });
+    const distance = camera.position.distanceTo(fit.center);
+
+    // 5. render célula a célula (row = direção, col = frame)
+    let done = 0;
+    for (const pose of poses) {
+      applyPose(pose);
+      core.placeCamera(camera, fit.center, pose.camAzimuth, elevation, distance);
+      sheetRenderer.render(scene, camera);
+      // SSAA 2x: o drawImage reduz de 2× para 1× e já faz o downsample.
+      sctx.drawImage(sheetRenderer.domElement, pose.frame * layout.cell, pose.dir * layout.cell, layout.cell, layout.cell);
+      done++;
+      setProgress(done / poses.length, `renderizando ${done}/${poses.length} — dir ${String(pose.dir).padStart(2, '0')}, frame ${pose.frame + 1}`);
+      await yieldToBrowser();
+    }
+
+    // 6. metadados
+    const meta = core.buildMetadata({
+      baseName: `${state.name}_${clip ? clip.name : 'static'}`,
+      layout, directionCount: dirCount, elevationDeg: elevation, times, fps,
+      loop: el.chkLoopPerfect.checked, ssaa, turntable, background
+    });
+    const aseprite = core.buildAsepriteJson(meta);
+
+    state.result = { layout, meta, aseprite, sheet, fps, fit, dirCount, turntable };
+    state.player.dir = 0;
+    state.player.frame = 0;
+    el.results.classList.add('on');
+    el.sheetInfo.textContent = `${layout.w}×${layout.h} px · ${layout.cols} frames × ${layout.rows} direções · célula ${layout.cell}px${ssaa ? ' · SSAA 2x' : ''} · half=${fit.half.toFixed(2)}`;
+    el.jsonInfo.textContent = `${meta.image} · ${Object.keys(meta.frames).length} frames · ${fps} fps · elevação ${elevation}° · ${turntable ? 'turntable' : 'modelo girando'}`;
+    drawSheetPreview();
+    buildDirectionSelector();
+    drawPlayer();
+    el.gifList.innerHTML = '';
+    setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)`, 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus(`falha na geração: ${err.message}`, 'err');
+  } finally {
+    state.model.rotation.y = prevRotation;
+    if (state.mixer && clip) state.mixer.setTime(prevTime);
+    state.model.updateMatrixWorld(true);
+    renderer.setClearColor(0x000000, 0);
+    state.generating = false;
+    state.playing = wasPlaying;
+    el.btnPlay.textContent = state.playing ? 'Pause' : 'Play';
+    el.btnGenerate.disabled = false;
+    showProgress(false);
+  }
+}
+
+el.btnGenerate.addEventListener('click', generate);
+
+/* ================================================================== *
+ * 7. Alvos preenchidos no próximo commit (exports + player)
+ * ================================================================== */
+function drawSheetPreview() {}
+function buildDirectionSelector() {}
+function drawPlayer() {}
+
+/* ================================================================== *
+ * 8. Boot
+ * ================================================================== */
 resizeViewport();
 tick();
 setStatus('pronto — arraste um .glb, use "Abrir" ou carregue o exemplo (Fox)');
