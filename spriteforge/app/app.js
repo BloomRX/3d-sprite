@@ -83,6 +83,14 @@ scene.add(rimLight);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x353b44, 0.45));
 
+// Direções normalizadas: a distância real é definida por fitRigToModel(), porque
+// luz em coordenadas fixas fica dentro de modelos grandes (e mata a sombra).
+const LIGHT_RIG = [
+  { light: keyLight, dir: new THREE.Vector3(4, 8, 6).normalize() },
+  { light: fillLight, dir: new THREE.Vector3(-7, 3, 4).normalize() },
+  { light: rimLight, dir: new THREE.Vector3(-3, 5, -8).normalize() }
+];
+
 // Chão que só recebe sombra: com ShadowMaterial o fundo continua transparente.
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.35, color: 0x000000 }));
 ground.rotation.x = -Math.PI / 2;
@@ -92,27 +100,12 @@ scene.add(ground);
 
 /** Ajusta luz de sombra + chão ao tamanho do modelo carregado. */
 function fitRigToModel() {
-  const r = Math.max(state.modelRadius, 1e-3);
-  const span = r * 1.6;
-  keyLight.shadow.camera.left = -span;
-  keyLight.shadow.camera.right = span;
-  keyLight.shadow.camera.top = span;
-  keyLight.shadow.camera.bottom = -span;
-  keyLight.shadow.camera.near = r * 0.05;
-  keyLight.shadow.camera.far = r * 12;
-  keyLight.shadow.camera.updateProjectionMatrix();
-  keyLight.target.position.set(
-    (state.modelBox.min.x + state.modelBox.max.x) / 2,
-    (state.modelBox.min.y + state.modelBox.max.y) / 2,
-    (state.modelBox.min.z + state.modelBox.max.z) / 2
-  );
+  const center = state.modelBox.getCenter(new THREE.Vector3());
+  const r = core.placeLightRig(LIGHT_RIG, center, state.modelRadius);
+  keyLight.target.position.copy(center);
   keyLight.target.updateMatrixWorld();
   ground.scale.set(r * 6, r * 6, 1);
-  ground.position.set(
-    (state.modelBox.min.x + state.modelBox.max.x) / 2,
-    state.modelBox.min.y,
-    (state.modelBox.min.z + state.modelBox.max.z) / 2
-  );
+  ground.position.set(center.x, state.modelBox.min.y, center.z);
 }
 
 /* ================================================================== *
@@ -229,6 +222,8 @@ async function loadFromArrayBuffer(buffer, name) {
   state.model.updateMatrixWorld(true);
 
   state.modelBox.setFromObject(state.model, true);
+  // Modelo sem geometria daria bounding box vazia → raio NaN em tudo.
+  if (state.modelBox.isEmpty()) state.modelBox.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
   state.modelRadius = state.modelBox.getSize(new THREE.Vector3()).length() / 2;
   state.model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
 

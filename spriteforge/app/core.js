@@ -380,6 +380,38 @@ export function encodeGif({ width, height, frames, delays = [], repeat = 0 }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Rig de luz
+ * ------------------------------------------------------------------ */
+
+/**
+ * Posiciona as luzes do rig em torno do modelo.
+ *
+ * A posição de uma DirectionalLight define a DIREÇÃO, mas também a origem da
+ * câmera de sombra. Deixar as luzes em coordenadas fixas (4,8,6) coloca a luz
+ * DENTRO de qualquer modelo maior que ~10 unidades — o Fox do exemplo tem raio
+ * ~88, então a sombra simplesmente não aparecia. Daí escalar pela bounding sphere.
+ *
+ * @param {Array<{light:THREE.Light, dir:THREE.Vector3, distance?:number}>} rig
+ */
+export function placeLightRig(rig, center, radius, { near = 0.05, far = 12, shadowSpan = 1.6 } = {}) {
+  const r = Math.max(radius, 1e-3);
+  for (const entry of rig) {
+    entry.light.position.copy(center).addScaledVector(entry.dir, r * (entry.distance || 4));
+    const shadow = entry.light.shadow;
+    if (!shadow || !shadow.camera) continue;
+    const span = r * shadowSpan;
+    shadow.camera.left = -span;
+    shadow.camera.right = span;
+    shadow.camera.top = span;
+    shadow.camera.bottom = -span;
+    shadow.camera.near = r * near;
+    shadow.camera.far = r * far;
+    shadow.camera.updateProjectionMatrix();
+  }
+  return r;
+}
+
+/* ------------------------------------------------------------------ *
  * Higiene de memória
  * ------------------------------------------------------------------ */
 
