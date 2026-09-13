@@ -95,14 +95,33 @@
       border:1px solid var(--line); border-radius:3px}
   code{background:#101317; padding:1px 4px; border-radius:3px}
   .hint{color:var(--mut); font-size:11px}
+  #loadError{
+    display:none; position:absolute; left:8px; right:8px; bottom:8px; z-index:6;
+    background:#3a1418; border:1px solid var(--err); color:#ffd7d7;
+    border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.4;
+  }
+  #fileWarning{
+    display:none; margin:0; padding:14px 18px; background:#3a2a10;
+    border-bottom:2px solid var(--warn); color:#ffe6b8; font-size:13px; line-height:1.5;
+  }
+  #fileWarning code{background:#221803; color:#ffd27a}
+  #fileWarning b{color:#fff}
 </style>
 </head>
 <body>
+<p id="fileWarning">
+  <b>Aberto por <code>file://</code> — o app não funciona assim.</b><br>
+  O navegador bloqueia módulos ES em <code>file://</code>, então nada desta página responde.
+  Rode o servidor local e use <b>http://localhost</b>:<br>
+  Windows: duplo clique em <code>SpriteForge.bat</code> (na raiz do repositório).
+  Linux/macOS: <code>./SpriteForge.sh</code>.
+  Manual: <code>py -m http.server 8080 --directory spriteforge\app</code>
+</p>
 <header>
   <h1>Sprite<span>Forge</span> Web</h1>
-  <span class="hint" id="modelInfo">nenhum modelo carregado</span>
+  <span class="hint" id="modelInfo">nenhum modelo carregado — .glb .gltf .obj .fbx .stl .ply</span>
   <div class="spacer"></div>
-  <input type="file" id="fileInput" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden>
+  <input type="file" id="fileInput" multiple hidden>
   <button id="btnOpen">Abrir .glb/.gltf</button>
   <button id="btnSample">Carregar exemplo (Fox)</button>
 </header>
@@ -170,7 +189,8 @@
     <div id="viewportWrap">
       <canvas id="viewport"></canvas>
       <div class="badge" id="viewBadge">arraste um .glb aqui</div>
-      <div id="dropHint">Solte o arquivo .glb / .gltf para carregar</div>
+      <div id="dropHint">Solte o modelo (.glb, .gltf, .obj, .fbx, .stl, .ply)<br><span class="hint">.gltf com .bin/texturas: arraste todos juntos</span></div>
+      <div id="loadError"></div>
     </div>
 
     <div id="progressWrap">
@@ -227,6 +247,20 @@
 
 <div id="status">pronto</div>
 
+<script>
+  // Script clássico de propósito: sob file:// os módulos ES nem carregam, então
+  // é só aqui que dá para explicar por que a página parece morta.
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var aviso = document.getElementById('fileWarning');
+      if (aviso) aviso.style.display = 'block';
+      var controles = document.querySelectorAll('button, input, select');
+      for (var i = 0; i < controles.length; i++) controles[i].disabled = true;
+      var st = document.getElementById('status');
+      if (st) { st.textContent = 'aberto por file:// — rode SpriteForge.bat e use http://localhost'; st.className = 'err'; }
+    });
+  }
+</script>
 <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 <script type="module" src="./app.js"></script>
 </body>

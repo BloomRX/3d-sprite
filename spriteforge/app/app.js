@@ -22,7 +22,7 @@ const el = {
   rngCell: $('rngCell'), cellVal: $('cellVal'), chkSsaa: $('chkSsaa'), selBackground: $('selBackground'),
   chkTurntable: $('chkTurntable'), chkShadow: $('chkShadow'),
   btnGenerate: $('btnGenerate'), progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
-  viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'),
+  viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
   results: $('results'), sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
   dlSheet: $('dlSheet'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
@@ -32,7 +32,6 @@ const el = {
 
 const state = {
   name: 'modelo',
-  gltf: null,
   model: null,
   mixer: null,
   clips: [],
@@ -163,7 +162,6 @@ function clearModel() {
   scene.remove(state.model);
   if (state.mixer) state.mixer.stopAllAction();
   state.mixer = null;
-  state.gltf = null;
   state.model = null;
   state.clips = [];
   state.clipIndex = -1;
@@ -209,58 +207,164 @@ function selectClip(index) {
   setStatus(clip ? `clip "${clip.name}" — ${dur.toFixed(3)}s` : 'modelo sem animação — 1 frame por direção');
 }
 
-async function loadFromArrayBuffer(buffer, name) {
-  const loader = new GLTFLoader();
-  const gltf = await new Promise((resolve, reject) => loader.parse(buffer, '', resolve, reject));
-  clearModel();
+/** Material padrão para formatos que não trazem material (STL, PLY). */
+function defaultMaterial(vertexColors = false) {
+  return new THREE.MeshStandardMaterial({ color: 0xc3cbd6, roughness: 0.85, metalness: 0, vertexColors });
+}
 
-  state.name = (name || 'modelo').replace(/\.(glb|gltf)$/i, '').replace(/[^\w.-]+/g, '_') || 'modelo';
-  state.gltf = gltf;
-  state.model = gltf.scene;
-  state.clips = gltf.animations || [];
+/** STL e PLY devolvem geometria solta: embrulha num Mesh com material próprio. */
+function meshFromGeometry(geometry) {
+  return new THREE.Mesh(geometry, defaultMaterial(geometry.hasAttribute('color')));
+}
+
+/**
+ * Devolve { root, animations } para qualquer formato suportado.
+ * Os loaders pesados (FBX puxa fflate) entram por import() dinâmico: quem só
+ * usa .glb não paga esse parse.
+ */
+async function parseModel(file, buffer, siblings) {
+  const info = core.formatInfo(file.name);
+  if (!info) throw new Error(`.${core.formatOf(file.name) || '?'} não é um formato suportado`);
+  switch (info.kind) {
+    case 'gltf': {
+      let payload = buffer;
+      if (info.ext === 'gltf') {
+        let json;
+        try {
+          json = JSON.parse(new TextDecoder().decode(buffer));
+        } catch {
+          throw new Error('este .gltf não é JSON válido — seria um .glb renomeado?');
+        }
+        const resolved = core.resolveGltfExternal(json, siblings);
+        if (resolved.missing.length) {
+          throw new Error(`faltam arquivos referenciados pelo .gltf: ${resolved.missing.join(', ')} — arraste todos juntos ou exporte como .glb`);
+        }
+        payload = resolved.json;
+      }
+      const gltf = await new Promise((resolve, reject) => new GLTFLoader().parse(payload, '', resolve, reject));
+      return { root: gltf.scene, animations: gltf.animations || [] };
+    }
+    case 'obj': {
+      const { OBJLoader } = await import('./vendor/OBJLoader.js');
+      return { root: new OBJLoader().parse(new TextDecoder().decode(buffer)), animations: [] };
+    }
+    case 'stl': {
+      const { STLLoader } = await import('./vendor/STLLoader.js');
+      return { root: meshFromGeometry(new STLLoader().parse(buffer)), animations: [] };
+    }
+    case 'ply': {
+      const { PLYLoader } = await import('./vendor/PLYLoader.js');
+      return { root: meshFromGeometry(new PLYLoader().parse(buffer)), animations: [] };
+    }
+    case 'fbx': {
+      const { FBXLoader } = await import('./vendor/FBXLoader.js');
+      const group = new FBXLoader().parse(buffer, '');
+      return { root: group, animations: group.animations || [] };
+    }
+    default:
+      throw new Error(`.${info.ext} não é um formato suportado`);
+  }
+}
+
+/** Coloca na cena um modelo já parseado — vale para qualquer formato. */
+function applyModel(root, animations, fileName) {
+  clearModel();
+  const kind = core.formatInfo(fileName)?.kind || '';
+  state.name = (fileName || 'modelo').replace(/\.[A-Za-z0-9]+$/, '').replace(/[^\w.-]+/g, '_') || 'modelo';
+  state.model = root;
+  state.clips = animations || [];
   scene.add(state.model);
   state.model.updateMatrixWorld(true);
+
+  // OBJ/STL/PLY costumam ter faces invertidas ou sem normal; glTF/FBX já trazem
+  // isso definido pelo autor.
+  const prepared = core.prepareLoaded(state.model, { doubleSide: kind === 'obj' || kind === 'stl' || kind === 'ply' });
 
   state.modelBox.setFromObject(state.model, true);
   // Modelo sem geometria daria bounding box vazia → raio NaN em tudo.
   if (state.modelBox.isEmpty()) state.modelBox.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
   state.modelRadius = state.modelBox.getSize(new THREE.Vector3()).length() / 2;
-  state.model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
-
   state.mixer = state.clips.length ? new THREE.AnimationMixer(state.model) : null;
+
   fitRigToModel();
   ground.visible = el.chkShadow.checked;
   framePreview();
   buildClipList();
 
-  const tris = (() => { let n = 0; state.model.traverse((o) => { if (o.isMesh && o.geometry?.index) n += o.geometry.index.count / 3; }); return Math.round(n); })();
-  el.modelInfo.textContent = `${state.name} · ${state.clips.length} clip(s) · ${tris} tris`;
-  el.viewBadge.textContent = `${state.name} — ${state.clips.length} animação(ões)`;
+  let triangles = 0;
+  state.model.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    const pos = o.geometry.getAttribute('position');
+    if (pos) triangles += (o.geometry.index ? o.geometry.index.count : pos.count) / 3;
+  });
+
+  el.modelInfo.textContent = `${state.name} · ${core.formatOf(fileName).toUpperCase()} · ${prepared.meshes} mesh · ${Math.round(triangles)} tris · ${state.clips.length} clip(s)`;
+  el.viewBadge.textContent = `${state.name} — ${state.clips.length ? `${state.clips.length} animação(ões)` : 'sem animação (1 frame por direção)'}`;
   el.btnGenerate.disabled = false;
-  setStatus(`"${state.name}" carregado${state.clips.length ? ` (${state.clips.map((c) => c.name).join(', ')})` : ' — sem animação'}`, 'ok');
-  if (!state.playing) { state.playing = true; el.btnPlay.textContent = 'Pause'; }
+  hideError();
+  setStatus(
+    `"${state.name}" carregado (${core.formatInfo(fileName)?.label || fileName})` +
+      (state.clips.length ? `: ${state.clips.map((c) => c.name).join(', ')}` : ' — sem animação') +
+      (prepared.computedNormals ? ` · ${prepared.computedNormals} normal(is) calculada(s)` : ''),
+    'ok'
+  );
+  if (!state.playing) {
+    state.playing = true;
+    el.btnPlay.textContent = 'Pause';
+  }
 }
 
-async function loadFile(file) {
+/** Erro visível: a barra de status é estreita demais para não passar batido. */
+function showError(message) {
+  el.loadError.textContent = message;
+  el.loadError.style.display = 'block';
+  setStatus(message, 'err');
+}
+function hideError() {
+  el.loadError.style.display = 'none';
+}
+
+/**
+ * Carrega um ou mais arquivos. Se vierem vários, o primeiro suportado é o
+ * modelo e os demais viram recursos dele (.bin/.png de um .gltf solto).
+ */
+async function loadFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  const main = files.find((f) => core.isSupported(f.name)) || files[0];
+  if (!core.isSupported(main.name)) {
+    showError(
+      `.${core.formatOf(main.name) || '?'} não é suportado. Formatos aceitos: ` +
+        `${core.SUPPORTED_EXTENSIONS.map((e) => '.' + e).join(', ')}. ` +
+        'Para .dae, .3ds, .usdz, .step ou .blend, exporte como .glb (Blender: File → Export → glTF 2.0).'
+    );
+    return;
+  }
+  hideError();
   try {
-    setStatus(`lendo ${file.name}…`);
-    const buffer = await file.arrayBuffer();
-    await loadFromArrayBuffer(buffer, file.name);
+    setStatus(`lendo ${main.name}…`);
+    const buffer = await main.arrayBuffer();
+    const siblings = new Map();
+    for (const f of files) if (f !== main) siblings.set(f.name, new Uint8Array(await f.arrayBuffer()));
+    const { root, animations } = await parseModel(main, buffer, siblings);
+    applyModel(root, animations, main.name);
   } catch (err) {
     console.error(err);
-    setStatus(`falha ao carregar ${file.name}: ${err.message} — se for .gltf com arquivos externos, exporte como .glb`, 'err');
+    showError(`Não consegui carregar ${main.name}: ${err.message}`);
   }
 }
 
 async function loadSample() {
   try {
+    hideError();
     setStatus('carregando samples/fox.glb…');
     const res = await fetch('./samples/fox.glb');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    await loadFromArrayBuffer(await res.arrayBuffer(), 'fox.glb');
+    const { root, animations } = await parseModel({ name: 'fox.glb' }, await res.arrayBuffer(), new Map());
+    applyModel(root, animations, 'fox.glb');
   } catch (err) {
     console.error(err);
-    setStatus(`não consegui carregar o exemplo: ${err.message}`, 'err');
+    showError(`Não consegui carregar o exemplo: ${err.message}`);
   }
 }
 
@@ -275,15 +379,14 @@ window.addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove('dragging');
-  const file = e.dataTransfer?.files?.[0];
-  if (file) loadFile(file);
+  if (e.dataTransfer?.files?.length) loadFiles(e.dataTransfer.files);
 });
 
 /* ================================================================== *
  * 5. Controles
  * ================================================================== */
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
-el.fileInput.addEventListener('change', () => { const f = el.fileInput.files?.[0]; if (f) loadFile(f); el.fileInput.value = ''; });
+el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
 el.btnSample.addEventListener('click', loadSample);
 
 el.clipSelect.addEventListener('change', () => selectClip(Number(el.clipSelect.value)));
@@ -589,6 +692,7 @@ el.btnGif.addEventListener('click', generateGifs);
 /* ================================================================== *
  * 10. Boot
  * ================================================================== */
+el.fileInput.accept = core.ACCEPT_ATTR;
 resizeViewport();
 tick();
 requestAnimationFrame(playerTick);

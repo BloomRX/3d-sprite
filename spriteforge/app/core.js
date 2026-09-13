@@ -380,6 +380,139 @@ export function encodeGif({ width, height, frames, delays = [], repeat = 0 }) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Formatos de entrada
+ * ------------------------------------------------------------------ */
+
+/** O que este app sabe abrir. `kind` decide qual loader usar. */
+export const SUPPORTED_FORMATS = [
+  { ext: 'glb', kind: 'gltf', label: 'glTF binário' },
+  { ext: 'gltf', kind: 'gltf', label: 'glTF JSON' },
+  { ext: 'obj', kind: 'obj', label: 'Wavefront OBJ' },
+  { ext: 'fbx', kind: 'fbx', label: 'Autodesk FBX' },
+  { ext: 'stl', kind: 'stl', label: 'STL' },
+  { ext: 'ply', kind: 'ply', label: 'PLY' }
+];
+export const SUPPORTED_EXTENSIONS = SUPPORTED_FORMATS.map((f) => f.ext);
+/** Valor pronto para o atributo `accept` do <input type="file">. */
+export const ACCEPT_ATTR = `${SUPPORTED_EXTENSIONS.map((e) => '.' + e).join(',')},model/gltf-binary,model/gltf+json`;
+
+/** Extensão em minúsculas, sem ponto ('' se não houver). */
+export function formatOf(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || '').trim());
+  return m ? m[1].toLowerCase() : '';
+}
+export function formatInfo(name) {
+  return SUPPORTED_FORMATS.find((f) => f.ext === formatOf(name)) || null;
+}
+export function isSupported(name) {
+  return !!formatInfo(name);
+}
+/** Só glTF e FBX trazem animação; os demais viram 1 frame por direção. */
+export function supportsAnimation(name) {
+  const info = formatInfo(name);
+  return !!info && (info.kind === 'gltf' || info.kind === 'fbx');
+}
+
+const MIME_BY_EXT = {
+  bin: 'application/octet-stream',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+  gif: 'image/gif', bmp: 'image/bmp', ktx2: 'image/ktx2', basis: 'image/basis'
+};
+
+function toBase64(bytes) {
+  // btoa é global no navegador e também no Node 16+ (usado nos testes).
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Um `.gltf` solto referencia `.bin` e texturas por URI relativa — e um arquivo
+ * arrastado do disco não tem URL. Quando o usuário arrasta vários arquivos
+ * juntos, trocamos cada URI por um `data:` URI embutido, e o GLTFLoader resolve
+ * tudo sozinho.
+ *
+ * @param {object} json   conteúdo já parseado do .gltf
+ * @param {Map<string, Uint8Array>} siblings  demais arquivos arrastados, por nome
+ * @returns {{json:object, missing:string[]}}
+ */
+export function resolveGltfExternal(json, siblings) {
+  const byName = new Map();
+  for (const [name, bytes] of siblings || []) byName.set(String(name).toLowerCase(), bytes);
+  const missing = [];
+  const patched = JSON.parse(JSON.stringify(json));
+  const swap = (owner) => {
+    const uri = owner.uri;
+    if (typeof uri !== 'string' || uri.startsWith('data:')) return;
+    let clean;
+    try {
+      clean = decodeURIComponent(uri.split('/').pop().split('?')[0]).toLowerCase();
+    } catch {
+      clean = uri.split('/').pop().toLowerCase();
+    }
+    const bytes = byName.get(clean);
+    if (!bytes) { missing.push(uri); return; }
+    owner.uri = `data:${MIME_BY_EXT[formatOf(clean)] || 'application/octet-stream'};base64,${toBase64(bytes)}`;
+  };
+  for (const buffer of patched.buffers || []) swap(buffer);
+  for (const image of patched.images || []) swap(image);
+  return { json: patched, missing };
+}
+
+/**
+ * Uma normal pode existir e ainda assim ser inútil: há exportador que grava
+ * (0,0,0) em vez de omitir o atributo, e o modelo renderiza preto. O OBJLoader
+ * do three NÃO faz isso (ele deriva a normal da faceta), mas PLY/OBJ de outras
+ * origens podem. Amostramos alguns vértices para manter o custo limitado.
+ */
+function normalsAreDegenerate(normal) {
+  const count = normal.count;
+  const steps = Math.min(count, 256);
+  for (let i = 0; i < steps; i++) {
+    const idx = Math.floor((i * count) / steps);
+    if (normal.getX(idx) !== 0 || normal.getY(idx) !== 0 || normal.getZ(idx) !== 0) return false;
+  }
+  return true;
+}
+
+/**
+ * Prepara qualquer modelo recém-carregado para o render: projeta sombra, sem
+ * frustum culling (skin se move), normal válida e vertex colors ligados quando
+ * a geometria traz cor.
+ */
+export function prepareLoaded(root, { doubleSide = false } = {}) {
+  const stats = { meshes: 0, computedNormals: 0, vertexColors: 0 };
+  root.traverse((obj) => {
+    if (!obj.isMesh) return;
+    stats.meshes++;
+    obj.castShadow = true;
+    obj.frustumCulled = false;
+    const geometry = obj.geometry;
+    if (geometry) {
+      const normal = geometry.getAttribute('normal');
+      if (!normal || normalsAreDegenerate(normal)) {
+        geometry.computeVertexNormals();
+        stats.computedNormals++;
+      }
+    }
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const material of materials) {
+      if (!material) continue;
+      if (doubleSide) material.side = THREE.DoubleSide;
+      if (geometry && geometry.hasAttribute('color') && 'vertexColors' in material) {
+        material.vertexColors = true;
+        stats.vertexColors++;
+      }
+      material.needsUpdate = true;
+    }
+  });
+  return stats;
+}
+
+/* ------------------------------------------------------------------ *
  * Rig de luz
  * ------------------------------------------------------------------ */
 
