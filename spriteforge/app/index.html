@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpriteForge Web — spritesheet 8-direcional com animação</title>
+<style>
+  :root{
+    --bg:#14171c; --panel:#1d222a; --panel2:#232a34; --line:#333c48;
+    --fg:#e8edf3; --mut:#93a1b1; --acc:#4da3ff; --ok:#48c78e; --warn:#f5a524; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:13px/1.45 system-ui,Segoe UI,Roboto,Ubuntu,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:12px; padding:8px 12px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  header h1{font-size:14px; margin:0; letter-spacing:.3px}
+  header h1 span{color:var(--acc)}
+  header .spacer{flex:1}
+  main{flex:1 1 auto; display:flex; min-height:0}
+  aside{
+    flex:0 0 300px; overflow:auto; background:var(--panel);
+    border-right:1px solid var(--line); padding:10px;
+  }
+  section.stage{flex:1 1 auto; display:flex; flex-direction:column; min-width:0}
+  .row{display:flex; gap:8px; align-items:center; margin:6px 0}
+  .row.wrap{flex-wrap:wrap}
+  label{color:var(--mut)}
+  fieldset{
+    border:1px solid var(--line); border-radius:6px; margin:0 0 10px; padding:8px;
+    background:var(--panel2);
+  }
+  legend{color:var(--acc); font-size:11px; text-transform:uppercase; letter-spacing:.6px; padding:0 4px}
+  button, select, input[type=file]::file-selector-button{
+    background:#2b3441; color:var(--fg); border:1px solid var(--line);
+    border-radius:5px; padding:5px 9px; cursor:pointer; font:inherit;
+  }
+  button:hover{background:#354052}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  button.primary{background:var(--acc); border-color:var(--acc); color:#06131f; font-weight:600}
+  button.primary:hover{filter:brightness(1.1)}
+  select, input[type=number]{background:#2b3441; color:var(--fg); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit}
+  input[type=range]{width:100%}
+  input[type=checkbox]{accent-color:var(--acc)}
+  .val{color:var(--fg); font-variant-numeric:tabular-nums; min-width:52px; text-align:right}
+  #viewportWrap{
+    position:relative; flex:1 1 auto; min-height:0; overflow:hidden;
+    background:
+      conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/20px 20px;
+  }
+  #viewport{display:block; width:100%; height:100%}
+  .badge{
+    position:absolute; left:8px; top:8px; padding:3px 7px; border-radius:4px;
+    background:rgba(10,13,17,.72); color:var(--mut); font-size:11px; pointer-events:none;
+    border:1px solid var(--line);
+  }
+  #dropHint{
+    position:absolute; inset:0; display:none; place-items:center; z-index:5;
+    background:rgba(10,13,17,.82); border:2px dashed var(--acc); color:var(--acc);
+    font-size:15px; pointer-events:none;
+  }
+  body.dragging #dropHint{display:grid}
+  #progressWrap{display:none; padding:8px 12px; background:var(--panel); border-top:1px solid var(--line)}
+  #progressWrap.on{display:block}
+  #progressTrack{height:8px; background:#2b3441; border-radius:4px; overflow:hidden}
+  #progressBar{height:100%; width:0; background:var(--acc); transition:width .08s linear}
+  #progressLabel{color:var(--mut); font-size:11px; margin-top:4px}
+  #results{
+    flex:0 0 auto; max-height:44%; overflow:auto; background:var(--panel);
+    border-top:1px solid var(--line); padding:10px; display:none;
+  }
+  #results.on{display:block}
+  .sheetBox{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start}
+  .canvasFrame{
+    background:
+      conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/16px 16px;
+    border:1px solid var(--line); border-radius:4px; padding:2px; max-width:100%;
+  }
+  canvas.out{image-rendering:pixelated; max-width:100%; height:auto; display:block}
+  #status{
+    flex:0 0 auto; padding:4px 12px; background:#101317; border-top:1px solid var(--line);
+    color:var(--mut); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  #status.err{color:var(--err)} #status.ok{color:var(--ok)}
+  .gifItem{display:inline-block; margin:4px 6px 0 0; text-align:center}
+  .gifItem figcaption{color:var(--mut); font-size:10px}
+  .gifItem img{image-rendering:pixelated; background:
+      conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/12px 12px;
+      border:1px solid var(--line); border-radius:3px}
+  code{background:#101317; padding:1px 4px; border-radius:3px}
+  .hint{color:var(--mut); font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sprite<span>Forge</span> Web</h1>
+  <span class="hint" id="modelInfo">nenhum modelo carregado</span>
+  <div class="spacer"></div>
+  <input type="file" id="fileInput" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" hidden>
+  <button id="btnOpen">Abrir .glb/.gltf</button>
+  <button id="btnSample">Carregar exemplo (Fox)</button>
+</header>
+
+<main>
+  <aside>
+    <fieldset>
+      <legend>Animação</legend>
+      <div class="row"><label for="clipSelect">Clip</label></div>
+      <div class="row"><select id="clipSelect" style="flex:1"><option value="-1">— sem animação —</option></select></div>
+      <div class="row">
+        <button id="btnPlay">Play</button>
+        <input type="range" id="scrub" min="0" max="1" step="0.0001" value="0" style="flex:1">
+        <span class="val" id="scrubVal">0.00s</span>
+      </div>
+      <div class="row"><input type="checkbox" id="chkLoopPerfect" checked><label for="chkLoopPerfect">Loop perfeito (descarta o último frame)</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Spritesheet</legend>
+      <div class="row">
+        <label for="selDirections">Direções</label>
+        <select id="selDirections">
+          <option value="4">4</option>
+          <option value="8" selected>8</option>
+          <option value="16">16</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="rngElevation">Elevação</label>
+        <input type="range" id="rngElevation" min="-10" max="89" step="1" value="18">
+        <span class="val" id="elevationVal">18°</span>
+      </div>
+      <div class="row">
+        <label for="rngFrames">Frames</label>
+        <input type="range" id="rngFrames" min="1" max="32" step="1" value="12">
+        <span class="val" id="framesVal">12</span>
+      </div>
+      <div class="row">
+        <label for="rngCell">Célula</label>
+        <input type="range" id="rngCell" min="16" max="512" step="8" value="128">
+        <span class="val" id="cellVal">128 px</span>
+      </div>
+      <div class="row"><input type="checkbox" id="chkSsaa"><label for="chkSsaa">SSAA 2x (renderiza 2x e reduz)</label></div>
+      <div class="row">
+        <label for="selBackground">Fundo</label>
+        <select id="selBackground">
+          <option value="transparent" selected>transparente</option>
+          <option value="white">branco</option>
+          <option value="dark">escuro</option>
+        </select>
+      </div>
+      <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
+      <div class="row"><input type="checkbox" id="chkShadow" checked><label for="chkShadow">Sombra no chão</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Gerar</legend>
+      <div class="row"><button id="btnGenerate" class="primary" style="flex:1" disabled>Gerar spritesheet</button></div>
+      <div class="hint">linhas = direções · colunas = frames</div>
+    </fieldset>
+  </aside>
+
+  <section class="stage">
+    <div id="viewportWrap">
+      <canvas id="viewport"></canvas>
+      <div class="badge" id="viewBadge">arraste um .glb aqui</div>
+      <div id="dropHint">Solte o arquivo .glb / .gltf para carregar</div>
+    </div>
+
+    <div id="progressWrap">
+      <div id="progressTrack"><div id="progressBar"></div></div>
+      <div id="progressLabel">—</div>
+    </div>
+
+    <div id="results">
+      <fieldset>
+        <legend>Sheet</legend>
+        <div class="sheetBox">
+          <div>
+            <div class="canvasFrame"><canvas id="sheetPreview" class="out"></canvas></div>
+            <div class="row wrap">
+              <input type="checkbox" id="chkGrid"><label for="chkGrid">grade</label>
+              <span class="hint" id="sheetInfo"></span>
+            </div>
+          </div>
+          <div style="flex:1; min-width:220px">
+            <div class="row wrap">
+              <button id="dlSheet">sheet.png</button>
+              <button id="dlJson">metadata.json</button>
+              <button id="dlAseprite">.aseprite.json</button>
+            </div>
+            <div class="hint" id="jsonInfo"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Player</legend>
+        <div class="sheetBox">
+          <div class="canvasFrame"><canvas id="playerCanvas" class="out"></canvas></div>
+          <div style="flex:1; min-width:220px">
+            <div class="row wrap">
+              <button id="btnPlayerPlay">Pause</button>
+              <label for="playerDir">direção</label>
+              <select id="playerDir"></select>
+            </div>
+            <div class="row"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><span class="val" id="fpsVal">12</span></div>
+            <div class="row"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="2"><span class="val" id="zoomVal">2x</span></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>GIF por direção</legend>
+        <div class="row wrap"><button id="btnGif">Gerar GIFs</button><span class="hint">fundo transparente via índice 0 (magenta)</span></div>
+        <div id="gifList" class="row wrap"></div>
+      </fieldset>
+    </div>
+  </section>
+</main>
+
+<div id="status">pronto</div>
+
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
