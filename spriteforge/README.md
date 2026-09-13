@@ -45,7 +45,11 @@ spriteforge/
     utils/   BufferGeometryUtils.js   (GLTFLoader importa ../utils/…)
     libs/    fflate.module.js         (FBXLoader importa ../libs/…)
     curves/  NURBSCurve.js, NURBSUtils.js  (FBXLoader importa ../curves/…)
-    samples/ fox.glb                  exemplo com Survey / Walk / Run
+    samples/ fox.glb                  exemplo animado (Survey / Walk / Run)
+             crate.obj                exemplo estático (OBJ, sem animação)
+tests/spriteforge/              testes do core.js (rodam em Node puro)
+tools/ci.yml                    workflow do GitHub Actions (veja “Ativar o CI”)
+devkit.json                     full_tests do DevKit.bat
 ```
 
 ## Formatos
@@ -67,26 +71,46 @@ exportação.
 
 ## Como usar
 
-1. **Carregue um modelo**: arraste em qualquer lugar da página, use **Abrir**, ou
-   **Carregar exemplo (Fox)**.
-2. **Escolha o clip** (se houver) e confira no viewport com Play/scrub. Sem animação o
-   app gera 1 frame por direção.
-3. **Ajuste**: direções (4/8/16), frames, elevação, célula, SSAA 2x, fundo, turntable,
-   sombra.
-4. **Gerar spritesheet** → preview com grade, player e downloads.
-5. **Gerar GIFs** → um GIF animado por direção.
+A página tem **duas abas**: **3D** (viewport + painel) e **Sheet + Player** (resultado).
+A barra de progresso fica na barra de abas, então dá para acompanhar a geração sem perder
+o resultado de vista.
+
+1. **Escolha uma predefinição** (opcional, mas é o caminho mais rápido):
+   **Padrão**, **Personagem 2D**, **Isométrico** ou **Itens / props**. Cada uma ajusta
+   elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar. **Reset** volta
+   ao padrão do site. As preferências ficam salvas no navegador (`localStorage`).
+2. **Carregue um modelo**: arraste em qualquer lugar da página, use **Abrir**,
+   **Exemplo (Fox)** (animado) ou **Exemplo estático** (OBJ, sem animação → 1 frame por
+   direção).
+3. **Escolha o clip** (se houver) e confira no viewport com Play/scrub.
+4. **Ajuste** o que a predefinição não cobriu.
+5. **Gerar spritesheet** → aba Sheet + Player com preview, grade, player e downloads.
+   **Cancelar** interrompe no meio (a sheet anterior continua válida).
+6. **Gerar GIFs** ou **Baixar tudo (.zip)**.
+
+Se algo não renderizar, o botão **Diagnóstico** diz o que a GPU informou (versão do
+WebGL, `UNMASKED_RENDERER`, `maxTextureSize`, `maxSamples`, RAM) e **copiar diagnóstico**
+cola tudo para colar num relato de bug.
 
 | Controle | Faixa | Efeito |
 |---|---|---|
 | Direções | 4 / 8 / 16 | linhas da sheet; passo angular = `360/N` |
 | Frames | 1–32 | colunas da sheet; amostras uniformes do clip |
 | Elevação | −10° a 89° | ângulo da câmera acima do horizonte |
+| **Frente em** | 0–359° | gira a convenção de “frente”: muitos modelos olham para +X ou −Z, e sem isso a direção 0 sai de lado |
+| **Pivot** | centro / base / topo | onde a âncora cai na célula; vai para o `metadata.json` e para o Aseprite |
 | Célula | 16–512 px | lado de cada sprite (a sheet é clampada em 8192 px) |
-| SSAA 2x | on/off | renderiza em 2× e reduz no `drawImage` |
+| **Padding** | 0–8 px | vão entre as células (contra *bleeding* em atlas mipmapeado) |
+| SSAA 2x | on/off | renderiza em 2× e reduz no `drawImage`. **Desliga sozinho** se `célula×2` passar do `maxTextureSize` da GPU |
+| **Escala travada** | 1–64 px/unidade | modelos diferentes saem do mesmo tamanho. Se o modelo não couber, o app **avisa** em vez de cortar |
 | Fundo | transparente / branco / escuro | fundo da sheet |
 | Turntable | on/off | gira a **câmera** em vez do **modelo** |
 | Sombra | on/off | plano com `ShadowMaterial` (aparece sobre fundo transparente) |
+| **Luz (azim./int.)** | 0–359° / 0–5.0 | gira e dosa a luz principal |
+| **Luz presa à câmera** | on/off | a luz gira junto com o que se move em relação a você: sombreamento idêntico em todas as direções (visual “flat”, bom para ícone/prop) |
 | Loop perfeito | on/off | descarta o último frame (idêntico ao primeiro) |
+| **Zoom (player)** | 1–6× | lupa **dentro** da caixa fixa de 256 px: não muda o layout |
+| **Escala do GIF** | 100 / 50 / 25 % | reduz antes de quantizar (GIF tem 256 cores por quadro) |
 
 ## O que sai
 
@@ -96,10 +120,20 @@ exportação.
 | `<nome>_metadata.json` | schema completo, compatível com o CLI do Blender |
 | `<nome>.aseprite.json` | sidecar Aseprite: `frames` em array + `meta.frameTags` |
 | `<nome>_dirNN.gif` | um GIF animado por direção, com transparência |
+| **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
 `order = "0 = frente, sentido anti-horário"`, `animation_axis = "columns"`, chaves
 `dirDD_FFF` (ex. `dir00_001`) e `animation.frames` com os tempos **em milissegundos**.
+
+Chaves **adicionadas** ao schema (aditivas: quem não conhece, ignora):
+`pivot: {x, y}` (normalizado dentro da célula, `y` medido do topo),
+`cell.padding`, `directions.angle_offset_deg` e `scale: {locked, px_per_unit}`.
+No Aseprite o pivot vira um `slice` chamado `pivot`, então o anchor abre no lugar certo.
+
+Em **Godot**, o `offset` do `Sprite2D`/`AnimatedSprite2D` que corresponde a esse pivot é
+`(0.5 - pivot.x, 0.5 - pivot.y) * tamanho da célula`; em **Unity**, o pivot em pixels é
+`(pivot.x * cell.w, (1 - pivot.y) * cell.h)`.
 
 ## Receitas de engine
 
@@ -191,6 +225,37 @@ func _ready() -> void:
 12. **`fps` é um slider só** (player, `metadata.json` e delay dos GIFs).
 13. **Nomes de download**: `<nome>_sheet.png`, `<nome>_metadata.json`,
     `<nome>.aseprite.json`, `<nome>_dirNN.gif`, com `<nome> = <modelo>_<clip>`.
+14. **Abas em vez de empilhar 3D e resultado.** O usuário reportou layout “truncado”: as
+    duas áreas disputavam a mesma altura. Cada uma passou a ter a página inteira, e a
+    barra de progresso mora na barra de abas.
+15. **O zoom do player é uma lupa, não um redimensionamento.** O canvas tem tamanho fixo
+    (256 px) e o zoom muda o **recorte** da célula (`cell/zoom`). Antes o canvas crescia
+    com o zoom e empurrava o layout inteiro — o bug relatado.
+16. **Pivot desloca o frustum, não o alvo.** `left = cx − half`, `top = cy + half`. As
+    duas formas foram medidas lado a lado no Fox e dão o mesmo número; a diferença é que
+    deslocar o alvo exigiria recalculá-lo a cada pose (o eixo “cima” da câmera muda com o
+    azimute), e no laço de render o pivot é aplicado uma única vez.
+17. **Pivot “base” não corta o modelo para ancorar.** O `half` continua sendo o do
+    enquadramento centrado; só o alvo desliza, e só até onde houver folga. Numa célula
+    quadrada, quando é a **altura** que limita o `half` (caso do Fox e do caixote),
+    `base` coincide com `centro` — não há para onde descer sem cortar o topo. A
+    diferença aparece em modelos mais largos que altos.
+18. **Escala travada avisa em vez de cortar.** Com `px/unidade` o `half` deixa de vir da
+    medição (`célula / (2 × px/un)`); se o modelo não couber, o status explica o que
+    fazer em vez de entregar um sprite decepado.
+19. **SSAA é limitado pela GPU.** `célula × 2` acima de `maxTextureSize` desliga o SSAA e
+    avisa — acima disso o render falha em silêncio ou derruba o contexto.
+20. **`WebGLRenderer` protegido nos dois lugares**, com `webglcontextlost` e um painel de
+    diagnóstico. Era o único ponto em que a página morria sem dizer por quê (driver
+    antigo, VM sem aceleração, VRAM esgotada).
+21. **Os testes entraram no repo.** O spec excluía testes unitários formais, mas o
+    harness era a única garantia real de que o auto-fit e os schemas continuavam certos a
+    cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
+    especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
+    mesma biblioteca que roda no navegador.
+22. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+    em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
+    ter um arquivo estático à mão.
 
 ## Testes
 
@@ -203,13 +268,59 @@ O spec define o teste como o checklist de navegador:
 - [ ] modelo sem animação gera 1 frame por direção sem erro;
 - [ ] zero erros no console nos dois cenários.
 
-A lógica pura (`core.js`) foi verificada à parte, em Node, contra os loaders e o
-`three.module.js` **vendidos no repo** e contra o `fox.glb` real: carga de GLB, tempos de
-frame, auto-fit nos dois modos (nenhum dos 96 frames estoura a célula), elevações de
-−10° a 89°, rig de luz fora do modelo, layout e clamp de 8192 px, schema exato do
-`metadata.json`, sidecar Aseprite, blocos do GIF (`GIF89a`, `NETSCAPE2.0`,
-`transparentIndex=0`, delays), `disposeHierarchy`, OBJ/STL/PLY reais, importação do FBX
-com `fflate`/`NURBS`, e o `.gltf` com `.bin` externo embutido como `data:` URI. O harness
-não está no repo porque o spec exclui testes unitários formais; para reproduzir, crie
-fora do repo um shim `node_modules/three` apontando para `app/vendor/three.module.js` e
-importe `app/core.js` + `app/vendor/*Loader.js`.
+### O que roda sozinho (sem navegador)
+
+```bat
+python3 tools/project_cli.py validate --full
+```
+
+ou, direto:
+
+```bat
+node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core.mjs
+```
+
+**156 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
+`spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
+azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
+**nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a
+89°, bounds assinados e os três pivots (inclusive a estabilidade do pivot em qualquer
+azimute), layout com padding e o clamp de 8192 px, o schema do `metadata.json` e o
+sidecar Aseprite, os blocos do GIF (`GIF89a`, um `NETSCAPE2.0`, `transparentIndex=0`,
+delays em centésimos), rig de luz, `disposeHierarchy` com geometria compartilhada, os
+quatro presets e a amostra estática.
+
+Lint (o CI roda exatamente isto):
+
+```bat
+npm install --no-save eslint@9 globals@15
+npx eslint --no-config-lookup -c tests/spriteforge/eslint.config.mjs spriteforge/app/app.js spriteforge/app/core.js
+```
+
+### Ativar o CI
+
+O workflow está pronto em **`tools/ci.yml`**, mas **não** em `.github/workflows/`: o
+token de GitHub App usado para escrever neste repositório não tem a permissão
+`workflows`, e o GitHub recusa o push de qualquer arquivo em `.github/workflows/`
+(`refusing to allow a GitHub App to create or update workflow`). Para ativar, na sua
+máquina:
+
+```bat
+cd C:\caminho\para\3d-sprite
+mkdir .github\workflows
+copy tools\ci.yml .github\workflows\ci.yml
+git add .github\workflows\ci.yml
+git commit -m "ci: ativa o workflow"
+git push
+```
+
+(Dá o mesmo resultado dar a permissão `Workflows: Read and write` à integração e me
+pedir para mover o arquivo.) O conteúdo roda `validate`, o lint e os três conjuntos de
+teste em todo push e PR.
+
+### O que **não** foi verificado
+
+Tudo que exige GPU de verdade. Este ambiente não tem navegador: a renderização em si, a
+aparência da sombra, a transparência do GIF num visualizador e o clique nos botões nunca
+foram executados. O checklist acima continua pendente e é o que falta conferir na sua
+máquina.
