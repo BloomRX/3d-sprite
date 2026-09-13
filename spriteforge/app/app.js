@@ -448,15 +448,153 @@ async function generate() {
 el.btnGenerate.addEventListener('click', generate);
 
 /* ================================================================== *
- * 7. Alvos preenchidos no próximo commit (exports + player)
+ * 7. Preview da sheet (com grade opcional)
  * ================================================================== */
-function drawSheetPreview() {}
-function buildDirectionSelector() {}
-function drawPlayer() {}
+function drawSheetPreview() {
+  const r = state.result;
+  if (!r) return;
+  const canvas = el.sheetPreview;
+  canvas.width = r.sheet.width;
+  canvas.height = r.sheet.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(r.sheet, 0, 0);
+  if (el.chkGrid.checked) {
+    ctx.strokeStyle = 'rgba(77,163,255,0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= r.layout.w; x += r.layout.cell) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, r.layout.h); }
+    for (let y = 0; y <= r.layout.h; y += r.layout.cell) { ctx.moveTo(0, y + 0.5); ctx.lineTo(r.layout.w, y + 0.5); }
+    ctx.stroke();
+  }
+}
+el.chkGrid.addEventListener('change', drawSheetPreview);
 
 /* ================================================================== *
- * 8. Boot
+ * 8. Player (zoom 1–6x, direção, play/pause, fps)
+ * ================================================================== */
+function buildDirectionSelector() {
+  const r = state.result;
+  if (!r) return;
+  el.playerDir.innerHTML = '';
+  const step = 360 / r.dirCount;
+  for (let d = 0; d < r.dirCount; d++) {
+    const opt = document.createElement('option');
+    opt.value = String(d);
+    opt.textContent = `dir${String(d).padStart(2, '0')} · ${Math.round(d * step)}°`;
+    el.playerDir.appendChild(opt);
+  }
+  el.playerDir.value = String(state.player.dir);
+}
+
+function drawPlayer() {
+  const r = state.result;
+  if (!r) return;
+  const zoom = Number(el.rngZoom.value) || 1;
+  const cell = r.layout.cell;
+  const canvas = el.playerCanvas;
+  if (canvas.width !== cell * zoom) { canvas.width = cell * zoom; canvas.height = cell * zoom; }
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(r.sheet, state.player.frame * cell, state.player.dir * cell, cell, cell, 0, 0, cell * zoom, cell * zoom);
+}
+
+function playerTick(ts) {
+  requestAnimationFrame(playerTick);
+  const r = state.result;
+  if (!r || !state.player.playing) { state.player.last = ts; return; }
+  const fps = Number(el.rngFps.value) || core.DEFAULT_FPS;
+  if (ts - state.player.last >= 1000 / fps) {
+    state.player.last = ts;
+    state.player.frame = (state.player.frame + 1) % r.layout.cols;
+    drawPlayer();
+  }
+}
+
+el.playerDir.addEventListener('change', () => { state.player.dir = Number(el.playerDir.value); drawPlayer(); });
+el.btnPlayerPlay.addEventListener('click', () => {
+  state.player.playing = !state.player.playing;
+  el.btnPlayerPlay.textContent = state.player.playing ? 'Pause' : 'Play';
+});
+
+/* ================================================================== *
+ * 9. Downloads: PNG, metadata.json, sidecar Aseprite e GIF por direção
+ * ================================================================== */
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+const jsonBlob = (obj) => new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+
+el.dlSheet.addEventListener('click', () => {
+  const r = state.result;
+  if (!r) return;
+  r.sheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.image), 'image/png');
+});
+el.dlJson.addEventListener('click', () => {
+  const r = state.result;
+  if (r) downloadBlob(jsonBlob(r.meta), `${r.meta.image.replace(/_sheet\.png$/, '')}_metadata.json`);
+});
+el.dlAseprite.addEventListener('click', () => {
+  const r = state.result;
+  if (r) downloadBlob(jsonBlob(r.aseprite), r.meta.image.replace(/_sheet\.png$/, '.aseprite.json'));
+});
+
+async function generateGifs() {
+  const r = state.result;
+  if (!r) { setStatus('gere a sheet antes dos GIFs', 'err'); return; }
+  const base = r.meta.image.replace(/_sheet\.png$/, '');
+  const cell = r.layout.cell;
+  const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
+  const sctx = r.sheet.getContext('2d');
+  el.btnGif.disabled = true;
+  el.gifList.innerHTML = '';
+  showProgress(true);
+  try {
+    for (let d = 0; d < r.dirCount; d++) {
+      const frames = [];
+      for (let f = 0; f < r.layout.cols; f++) frames.push(sctx.getImageData(f * cell, d * cell, cell, cell).data);
+      const bytes = core.encodeGif({ width: cell, height: cell, frames, delays: frames.map(() => delay) });
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
+      const fig = document.createElement('figure');
+      fig.className = 'gifItem';
+      const img = document.createElement('img');
+      img.src = url;
+      img.width = cell;
+      img.height = cell;
+      const cap = document.createElement('figcaption');
+      cap.textContent = `dir${String(d).padStart(2, '0')}`;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${base}_dir${String(d).padStart(2, '0')}.gif`;
+      link.textContent = 'baixar';
+      fig.append(img, cap, link);
+      el.gifList.appendChild(fig);
+      setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
+      await yieldToBrowser();
+    }
+    setStatus(`${r.dirCount} GIFs prontos — transparência por índice 0 (magenta)`, 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus(`falha no GIF: ${err.message}`, 'err');
+  } finally {
+    el.btnGif.disabled = false;
+    showProgress(false);
+  }
+}
+el.btnGif.addEventListener('click', generateGifs);
+
+/* ================================================================== *
+ * 10. Boot
  * ================================================================== */
 resizeViewport();
 tick();
+requestAnimationFrame(playerTick);
 setStatus('pronto — arraste um .glb, use "Abrir" ou carregue o exemplo (Fox)');
