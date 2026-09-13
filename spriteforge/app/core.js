@@ -18,6 +18,50 @@ export const MAX_SHEET_SIDE = 8192;
 export const DEFAULT_FPS = 12;
 /** Pixels com alpha abaixo disso viram índice 0 (transparente) no GIF. */
 export const GIF_ALPHA_CUT = 8;
+/**
+ * Folga (normalizada, medida da borda) entre o modelo e a borda da célula nos
+ * pivots "base"/"top". É derivada do SCALE_FIX: a âncora encosta em ±SCALE_FIX
+ * no NDC, ou seja, em (1 - SCALE_FIX) / 2 = 0.07 da borda na imagem. Mantido
+ * como constante para que o `pivot` do metadata bata com o pixel renderizado.
+ */
+export const PIVOT_MARGIN = (1 - SCALE_FIX) / 2;
+
+/**
+ * Estado inicial dos controles — é o que o botão Reset restaura.
+ * `lightIntensity` vem do slider como inteiro 0..50 e entra aqui já /10.
+ */
+export const DEFAULT_SETTINGS = {
+  directions: 8, frames: 12, elevation: 18, azimuthOffset: 0, pivot: 'center',
+  cell: 128, padding: 0, ssaa: false, lockScale: false, pxPerUnit: 8,
+  turntable: false, background: 'transparent', shadow: true,
+  lightCamera: false, lightAz: 34, lightIntensity: 2.6,
+  loopPerfect: true, fps: 12, zoom: 1, gifScale: 1
+};
+
+/**
+ * Atalhos por tipo de projeto. Cada um é um patch sobre DEFAULT_SETTINGS, então
+ * adicionar um controle novo não quebra os presets.
+ */
+export const PRESETS = {
+  default: {},
+  // Personagem de plataforma: câmera na altura do chão, pé ancorado embaixo.
+  char2d: { elevation: 0, pivot: 'base', cell: 128, shadow: true, lightCamera: false },
+  // Isométrico: 30° (dimétrico) e escala travada para vários objetos combinarem.
+  iso: { elevation: 30, pivot: 'center', cell: 128, lockScale: true, pxPerUnit: 8, shadow: true },
+  // Itens/ícones: 4 direções, célula pequena, luz frontal sem sombra.
+  props: { directions: 4, elevation: 0, pivot: 'center', cell: 64, shadow: false, lightCamera: true }
+};
+
+export function presetSettings(name) {
+  return { ...DEFAULT_SETTINGS, ...(PRESETS[name] || {}) };
+}
+
+/** Pivot normalizado (0..1) dentro da célula, no formato que as engines usam. */
+export function pivotPoint(pivot) {
+  if (pivot === 'base') return { x: 0.5, y: 1 - PIVOT_MARGIN };
+  if (pivot === 'top') return { x: 0.5, y: PIVOT_MARGIN };
+  return { x: 0.5, y: 0.5 };
+}
 
 /* ------------------------------------------------------------------ *
  * Amostragem de poses
@@ -30,6 +74,8 @@ export const GIF_ALPHA_CUT = 8;
 export function pickEven(total, n) {
   const count = Math.max(1, Math.min(n, total));
   if (count >= total) return Array.from({ length: total }, (_, i) => i);
+  // Com uma amostra só o passo é indefinido ((count-1) no denominador = 0/0 → NaN).
+  if (count <= 1) return [0];
   const out = new Set();
   for (let i = 0; i < count; i++) out.add(Math.round((i * (total - 1)) / (count - 1)));
   out.add(0);
@@ -50,10 +96,10 @@ export function pickEven(total, n) {
  * não). Por isso o auto-fit recebe exatamente estas poses e mede do jeito que o
  * render vai desenhar — é o que garante que a medição nunca descole da imagem.
  */
-export function buildPoses({ directionCount, frameCount, times, model, turntable = false }) {
+export function buildPoses({ directionCount, frameCount, times, model, turntable = false, azimuthOffsetDeg = 0 }) {
   const poses = [];
   for (let dir = 0; dir < directionCount; dir++) {
-    const a = directionAzimuth(dir, directionCount);
+    const a = directionAzimuth(dir, directionCount, azimuthOffsetDeg);
     for (let frame = 0; frame < frameCount; frame++) {
       poses.push({
         dir,
@@ -61,7 +107,7 @@ export function buildPoses({ directionCount, frameCount, times, model, turntable
         time: times[frame],
         model,
         modelAzimuth: turntable ? 0 : a,
-        camAzimuth: turntable ? turntableAzimuth(dir, directionCount) : 0
+        camAzimuth: turntable ? turntableAzimuth(dir, directionCount, azimuthOffsetDeg) : 0
       });
     }
   }
@@ -94,9 +140,13 @@ export function frameTimes(duration, frameCount, loopPerfect = true) {
   return out;
 }
 
-/** Azimute (rad) da direção `index`: 0 = frente, sentido anti-horário. */
-export function directionAzimuth(index, directionCount) {
-  return (2 * Math.PI * index) / directionCount;
+/**
+ * Azimute (rad) da direção `index`: 0 = frente, sentido anti-horário.
+ * `offsetDeg` gira a convenção de "frente": muitos modelos olham para +X ou -Z,
+ * e sem isso a direção 0 sai de lado.
+ */
+export function directionAzimuth(index, directionCount, offsetDeg = 0) {
+  return (2 * Math.PI * index) / directionCount + THREE.MathUtils.degToRad(offsetDeg);
 }
 
 /**
@@ -104,8 +154,8 @@ export function directionAzimuth(index, directionCount) {
  * A câmera orbita no sentido oposto ao do modelo para manter a convenção
  * "0 = frente, anti-horário" igual nos dois modos.
  */
-export function turntableAzimuth(index, directionCount) {
-  return -directionAzimuth(index, directionCount);
+export function turntableAzimuth(index, directionCount, offsetDeg = 0) {
+  return -directionAzimuth(index, directionCount, offsetDeg);
 }
 
 /** Posição da câmera a partir de centro + azimute + elevação + distância. */
@@ -142,6 +192,52 @@ export function placeCamera(camera, center, azimuthRad, elevationDeg, distance) 
 export function createOrthoCamera({ half, center, elevationDeg, azimuthRad = 0, distance = half * 6 + 1 }) {
   const camera = new THREE.OrthographicCamera(-half, half, half, -half, 0.001, distance * 2);
   return placeCamera(camera, center, azimuthRad, elevationDeg, distance);
+}
+
+/**
+ * Enquadramento a partir dos extremos medidos por measureFit, para um dado pivot.
+ * Devolve o deslocamento do ALVO da câmera (cx, cy) no plano da imagem e o
+ * `half` que faz tudo caber. O modelo nunca é movido: quem desloca é a câmera,
+ * o que mantém o pivot coerente em qualquer elevação/azimute.
+ *
+ *  center → o centro do modelo fica no meio da célula;
+ *  base   → a base encosta na borda de baixo (pés de personagem no chão);
+ *  top    → o topo encosta na borda de cima (itens pendurados, HUD).
+ */
+export function frameForPivot(bounds, pivot = 'center', scaleFix = SCALE_FIX) {
+  const { minX, maxX, minY, maxY } = bounds;
+  const cx = (minX + maxX) / 2;
+  const cyMid = (minY + maxY) / 2;
+  // O half é sempre o do enquadramento CENTRADO: é o menor valor que não corta
+  // nada. Redimensionar por pivot (a tentação óbvia) jogaria o modelo para fora.
+  const half = Math.max(
+    Math.abs(minX - cx), Math.abs(maxX - cx),
+    Math.abs(minY - cyMid), Math.abs(maxY - cyMid)
+  ) / scaleFix;
+  // Aí o alvo desliza até encostar a âncora na borda útil (±scaleFix), usando a
+  // folga que existir. Quando a altura do modelo é o que limita o half, não há
+  // folga vertical e "base" coincide com "center" — é o resultado correto, não
+  // uma falha: numa célula quadrada não dá para ancorar no pé e manter o topo.
+  let cy = cyMid;
+  if (pivot === 'base') cy = minY + scaleFix * half;
+  else if (pivot === 'top') cy = maxY - scaleFix * half;
+  return { cx, cy, half, pivot };
+}
+
+/**
+ * Câmera ortográfica enquadrada num alvo deslocado por (cx, cy) no plano da
+ * imagem. Os eixos (direita/cima) saem da própria matrixWorld da câmera já
+ * orientada, então funciona em qualquer elevação — inclusive perto de 89°,
+ * onde o "up" do mundo degenera.
+ */
+export function createFramedCamera({ half, center, cx = 0, cy = 0, elevationDeg, azimuthRad = 0, distance = half * 6 + 1 }) {
+  const camera = new THREE.OrthographicCamera(-half, half, half, -half, 0.001, distance * 2);
+  placeCamera(camera, center, azimuthRad, elevationDeg, distance);
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  const target = center.clone().addScaledVector(right, cx).addScaledVector(up, cy);
+  placeCamera(camera, target, azimuthRad, elevationDeg, distance);
+  return { camera, target };
 }
 
 /**
@@ -186,6 +282,9 @@ export function measureFit(poses, applyPose, { elevationDeg, scaleFix = SCALE_FI
   const probe = createOrthoCamera({ half: 1, center, elevationDeg });
   let maxAbsX = 0;
   let maxAbsY = 0;
+  // Extremos ASSINADOS no plano da imagem: sem eles não há como saber onde fica
+  // a base ou o topo do modelo, e o pivot "base" seria impossível.
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const o of observed) {
     applyPose(o.pose);
     box.setFromObject(o.pose.model, true);
@@ -196,12 +295,20 @@ export function measureFit(poses, applyPose, { elevationDeg, scaleFix = SCALE_FI
       corner.applyMatrix4(view);
       maxAbsX = Math.max(maxAbsX, Math.abs(corner.x));
       maxAbsY = Math.max(maxAbsY, Math.abs(corner.y));
+      if (corner.x < minX) minX = corner.x;
+      if (corner.x > maxX) maxX = corner.x;
+      if (corner.y < minY) minY = corner.y;
+      if (corner.y > maxY) maxY = corner.y;
     }
   }
 
   const maxAbs = Math.max(maxAbsX, maxAbsY);
   if (!Number.isFinite(maxAbs) || maxAbs <= 0) return null;
-  return { center, half: maxAbs / scaleFix, maxAbsX, maxAbsY, samples: observed.length };
+  const bounds = { minX, maxX, minY, maxY };
+  return {
+    center, half: maxAbs / scaleFix, maxAbsX, maxAbsY, samples: observed.length,
+    bounds, frame: frameForPivot(bounds, 'center', scaleFix)
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -211,17 +318,34 @@ export function measureFit(poses, applyPose, { elevationDeg, scaleFix = SCALE_FI
 /**
  * linhas = direções, colunas = frames. Clampa a célula se a sheet passar do limite.
  */
-export function computeLayout(directionCount, frameCount, cell, maxSide = MAX_SHEET_SIDE) {
+export function computeLayout(directionCount, frameCount, cell, maxSide = MAX_SHEET_SIDE, padding = 0) {
   const cols = Math.max(1, frameCount);
   const rows = Math.max(1, directionCount);
   let c = Math.max(1, Math.floor(cell));
+  const pad = Math.max(0, Math.floor(padding));
   let warning = null;
-  if (cols * c > maxSide || rows * c > maxSide) {
+  const sizeFor = (cc) => ({
+    w: cols * cc + (cols + 1) * pad,
+    h: rows * cc + (rows + 1) * pad
+  });
+  let size = sizeFor(c);
+  if (size.w > maxSide || size.h > maxSide) {
     const before = c;
-    c = Math.max(1, Math.floor(Math.min(maxSide / cols, maxSide / rows)));
+    c = Math.max(1, Math.floor(Math.min(
+      (maxSide - (cols + 1) * pad) / cols,
+      (maxSide - (rows + 1) * pad) / rows
+    )));
+    size = sizeFor(c);
     warning = `sheet passaria de ${maxSide} px: célula reduzida de ${before} para ${c} px`;
   }
-  return { cell: c, cols, rows, w: cols * c, h: rows * c, warning };
+  return { cell: c, padding: pad, cols, rows, w: size.w, h: size.h, warning };
+}
+
+/** Retângulo (em px) de uma célula dentro da sheet — única fonte da verdade. */
+export function cellRect(layout, dir, frame) {
+  const step = layout.cell + (layout.padding || 0);
+  const pad = layout.padding || 0;
+  return { x: pad + frame * step, y: pad + dir * step, w: layout.cell, h: layout.cell };
 }
 
 /** Chave de frame no formato do metadata: dir00_001 (direção 2 dígitos, frame 3 dígitos, 1-based). */
@@ -246,7 +370,11 @@ export function buildMetadata({
   loop = true,
   ssaa = false,
   turntable = false,
-  background = 'transparent'
+  background = 'transparent',
+  azimuthOffsetDeg = 0,
+  pivot = 'center',
+  lockScale = false,
+  pxPerUnit = null
 }) {
   const cell = layout.cell;
   const perFrameMs = Math.round(1000 / fps);
@@ -255,7 +383,7 @@ export function buildMetadata({
   for (let d = 0; d < directionCount; d++) {
     for (let f = 0; f < frameCount; f++) {
       frames[frameKey(d, f)] = {
-        frame: { x: f * cell, y: d * cell, w: cell, h: cell },
+        frame: cellRect(layout, d, f),
         rotated: false,
         trimmed: false,
         spriteSourceSize: { x: 0, y: 0, w: cell, h: cell },
@@ -268,12 +396,16 @@ export function buildMetadata({
     tool: 'SpriteForge Web 1.0',
     image: `${baseName}_sheet.png`,
     size: { w: layout.w, h: layout.h },
-    cell: { w: cell, h: cell },
+    cell: { w: cell, h: cell, padding: layout.padding || 0 },
     grid: { cols: layout.cols, rows: layout.rows },
+    // Pivot normalizado (0..1) dentro da célula: é o que as engines usam para
+    // posicionar o sprite (Godot: offset; Unity: pivot do Sprite).
+    pivot: pivotPoint(pivot),
     directions: {
       count: directionCount,
       layout: 'row-per-direction',
       angle_step_deg: 360 / directionCount,
+      angle_offset_deg: azimuthOffsetDeg,
       elevation_deg: elevationDeg,
       order: '0 = frente, sentido anti-horário',
       animation_axis: 'columns'
@@ -286,6 +418,9 @@ export function buildMetadata({
       loop,
       duration_ms: Math.round(frameCount * perFrameMs)
     },
+    // Escala travada: quando ligada, modelos diferentes saem no mesmo tamanho
+    // em px por unidade de mundo, então dá para misturá-los na mesma cena.
+    scale: { locked: !!lockScale, px_per_unit: lockScale ? pxPerUnit : null },
     render: { engine: 'webgl', ssaa: !!ssaa, turntable: !!turntable, background },
     frames
   };
@@ -298,12 +433,13 @@ export function buildMetadata({
 export function buildAsepriteJson(meta) {
   const cell = meta.cell.w;
   const { rows, cols } = meta.grid;
+  const rectLayout = { cell, padding: meta.cell.padding || 0 };
   const frames = [];
   for (let d = 0; d < rows; d++) {
     for (let f = 0; f < cols; f++) {
       const src = meta.frames[frameKey(d, f)];
       frames.push({
-        frame: { x: f * cell, y: d * cell, w: cell, h: cell },
+        frame: cellRect(rectLayout, d, f),
         rotated: false,
         trimmed: false,
         spriteSourceSize: { x: 0, y: 0, w: cell, h: cell },
@@ -330,6 +466,17 @@ export function buildAsepriteJson(meta) {
       format: 'RGBA8888',
       size: { w: meta.size.w, h: meta.size.h },
       scale: '1',
+      // Slice "pivot": abre o Aseprite com o anchor já no lugar certo.
+      slices: meta.pivot ? [{
+        name: 'pivot',
+        color: '#0000ff',
+        keys: [{
+          frame: 0,
+          bounds: { x: 0, y: 0, w: cell, h: cell },
+          center: { x: 0, y: 0, w: 0, h: 0 },
+          pivot: { x: Math.round(meta.pivot.x * cell), y: Math.round(meta.pivot.y * cell) }
+        }]
+      }] : [],
       frameTags
     }
   };
