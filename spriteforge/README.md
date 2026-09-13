@@ -48,7 +48,7 @@ spriteforge/
     samples/ fox.glb                  exemplo animado (Survey / Walk / Run)
              crate.obj                exemplo estático (OBJ, sem animação)
 tests/spriteforge/              testes do core.js (rodam em Node puro)
-tools/ci.yml                    workflow do GitHub Actions (veja “Ativar o CI”)
+.github/workflows/ci.yml        CI: validate + ESLint + os três conjuntos de teste
 devkit.json                     full_tests do DevKit.bat
 ```
 
@@ -306,26 +306,21 @@ npm install --no-save eslint@9 globals@15
 npx eslint --no-config-lookup -c tests/spriteforge/eslint.config.mjs spriteforge/app/app.js spriteforge/app/core.js
 ```
 
-### Ativar o CI
+### CI
 
-O workflow está pronto em **`tools/ci.yml`**, mas **não** em `.github/workflows/`: o
-token de GitHub App usado para escrever neste repositório não tem a permissão
-`workflows`, e o GitHub recusa o push de qualquer arquivo em `.github/workflows/`
-(`refusing to allow a GitHub App to create or update workflow`). Para ativar, na sua
-máquina:
+`.github/workflows/ci.yml` roda em todo push e PR: `validate`, ESLint e os três conjuntos
+de teste (`tools/test_project_cli.py`, `tools/test_creation.py` e `test-core.mjs`).
 
-```bat
-cd C:\caminho\para\3d-sprite
-mkdir .github\workflows
-copy tools\ci.yml .github\workflows\ci.yml
-git add .github\workflows\ci.yml
-git commit -m "ci: ativa o workflow"
-git push
-```
+O arquivo entrou pelo commit `25a9445`, feito na máquina do mantenedor: o token de GitHub
+App usado para escrever aqui não tem a permissão `workflows`, e o GitHub recusa o push de
+qualquer arquivo em `.github/workflows/` (`refusing to allow a GitHub App to create or
+update workflow`). Enquanto o workflow morou em `tools/ci.yml` ele era só conteúdo;
+ativado, é o que garante que uma mudança em `core.js` não quebre o auto-fit nem os
+schemas sem ninguém perceber.
 
-(Dá o mesmo resultado dar a permissão `Workflows: Read and write` à integração e me
-pedir para mover o arquivo.) O conteúdo roda `validate`, o lint e os três conjuntos de
-teste em todo push e PR.
+Cada passo é *fail-fast* — `test-core.mjs` termina com `process.exit(fail === 0 ? 0 : 1)`,
+os testes do DevKit usam `unittest.main()` e o `validate` propaga o código de `main()` —,
+então um passo verde significa checagem aprovada, não passo vazio.
 
 ### O que **não** foi verificado
 
