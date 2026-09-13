@@ -225,19 +225,31 @@ export function frameForPivot(bounds, pivot = 'center', scaleFix = SCALE_FIX) {
 }
 
 /**
- * Câmera ortográfica enquadrada num alvo deslocado por (cx, cy) no plano da
- * imagem. Os eixos (direita/cima) saem da própria matrixWorld da câmera já
- * orientada, então funciona em qualquer elevação — inclusive perto de 89°,
- * onde o "up" do mundo degenera.
+ * Aplica o deslocamento do pivot deslocando o FRUSTUM da câmera ortográfica em
+ * vez de mover o alvo. Medido nas duas formas, o resultado é o mesmo — mas só
+ * enquanto o alvo for recalculado a cada azimute, porque o eixo "cima" da
+ * câmera muda com ele. No laço de render a câmera é reposicionada por pose e o
+ * pivot é aplicado uma única vez, então deslocar o frustum (que vive no espaço
+ * da imagem) é o que dispensa esse recálculo por pose. Vale para qualquer
+ * azimute e qualquer elevação, inclusive 89°.
+ *
+ * Com left = cx - half e right = cx + half, o que estava em x = cx no plano da
+ * imagem passa a cair em NDC 0 (centro da célula).
  */
+export function applyPivotOffset(camera, { cx = 0, cy = 0, half }) {
+  camera.left = cx - half;
+  camera.right = cx + half;
+  camera.bottom = cy - half;
+  camera.top = cy + half;
+  camera.updateProjectionMatrix();
+  return camera;
+}
+
+/** Câmera ortográfica já enquadrada e com o pivot aplicado. */
 export function createFramedCamera({ half, center, cx = 0, cy = 0, elevationDeg, azimuthRad = 0, distance = half * 6 + 1 }) {
-  const camera = new THREE.OrthographicCamera(-half, half, half, -half, 0.001, distance * 2);
-  placeCamera(camera, center, azimuthRad, elevationDeg, distance);
-  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-  const target = center.clone().addScaledVector(right, cx).addScaledVector(up, cy);
-  placeCamera(camera, target, azimuthRad, elevationDeg, distance);
-  return { camera, target };
+  const camera = createOrthoCamera({ half, center, elevationDeg, azimuthRad, distance });
+  applyPivotOffset(camera, { cx, cy, half });
+  return { camera, target: center.clone() };
 }
 
 /**

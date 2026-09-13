@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { zipSync, strToU8 } from './libs/fflate.module.js';
 import * as core from './core.js';
 
 /* ================================================================== *
@@ -16,19 +17,30 @@ import * as core from './core.js';
 const $ = (id) => document.getElementById(id);
 const el = {
   fileInput: $('fileInput'), btnOpen: $('btnOpen'), btnSample: $('btnSample'), modelInfo: $('modelInfo'),
+  btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
+  tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
   selDirections: $('selDirections'), rngElevation: $('rngElevation'), elevationVal: $('elevationVal'),
+  rngAzimuth: $('rngAzimuth'), azimuthVal: $('azimuthVal'), selPivot: $('selPivot'),
+  rngPadding: $('rngPadding'), paddingVal: $('paddingVal'),
+  chkLockScale: $('chkLockScale'), rowScaleLock: $('rowScaleLock'), rngScaleLock: $('rngScaleLock'), scaleLockVal: $('scaleLockVal'),
   rngFrames: $('rngFrames'), framesVal: $('framesVal'),
   rngCell: $('rngCell'), cellVal: $('cellVal'), chkSsaa: $('chkSsaa'), selBackground: $('selBackground'),
   chkTurntable: $('chkTurntable'), chkShadow: $('chkShadow'),
-  btnGenerate: $('btnGenerate'), progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
+  chkLightCamera: $('chkLightCamera'), rngLightAz: $('rngLightAz'), lightAzVal: $('lightAzVal'),
+  rngLightInt: $('rngLightInt'), lightIntVal: $('lightIntVal'),
+  btnReset: $('btnReset'),   // os botões de preset vêm de .preset[data-preset]
+  btnGenerate: $('btnGenerate'), btnCancel: $('btnCancel'),
+  progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
-  results: $('results'), sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
-  dlSheet: $('dlSheet'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
-  playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
+  sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
+  dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
+  playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   rngFps: $('rngFps'), fpsVal: $('fpsVal'), rngZoom: $('rngZoom'), zoomVal: $('zoomVal'),
-  btnGif: $('btnGif'), gifList: $('gifList'), status: $('status')
+  btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), gifList: $('gifList'), status: $('status')
 };
+const faltando = Object.entries(el).filter(([, node]) => !node).map(([k]) => k);
+if (faltando.length) console.error('ids ausentes no index.html:', faltando.join(', '));
 
 const state = {
   name: 'modelo',
@@ -42,7 +54,9 @@ const state = {
   modelBox: new THREE.Box3(),
   modelRadius: 1,
   result: null,        // { layout, meta, aseprite, sheet, fps }
-  player: { dir: 0, frame: 0, playing: true, last: 0 }
+  player: { dir: 0, frame: 0, playing: true, last: 0 },
+  cancelled: false,
+  gifUrls: new Map()
 };
 
 const setStatus = (msg, kind = '') => {
@@ -55,12 +69,87 @@ const setStatus = (msg, kind = '') => {
  * ================================================================== */
 const scene = new THREE.Scene();
 const previewCamera = new THREE.PerspectiveCamera(35, 1, 0.01, 5000);
-const renderer = new THREE.WebGLRenderer({ canvas: el.viewport, alpha: true, preserveDrawingBuffer: true, antialias: true });
-renderer.setPixelRatio(1);
-renderer.setClearColor(0x000000, 0);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.NoToneMapping;
+
+/**
+ * Criar um WebGLRenderer é o único ponto onde este app morre sem dizer por quê
+ * (driver antigo, GPU bloqueada, VM sem aceleração). Então ele é protegido: se
+ * falhar, a página continua viva, explica o motivo e abre o diagnóstico.
+ */
+const glProblems = [];
+function makeRenderer(options, purpose) {
+  try {
+    const r = new THREE.WebGLRenderer(options);
+    r.setPixelRatio(1);
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.toneMapping = THREE.NoToneMapping;
+    return r;
+  } catch (err) {
+    console.error(err);
+    glProblems.push(`${purpose}: ${err && err.message ? err.message : String(err)}`);
+    reportGlFailure(purpose, err);
+    return null;
+  }
+}
+
+/** O que a GPU desta máquina aceita — é o que falta quando algo não renderiza. */
+function collectDiagnostics() {
+  const lines = [];
+  const push = (k, v) => lines.push(`${k}: ${v}`);
+  push('SpriteForge', 'Web 1.0');
+  push('three.js', `r${THREE.REVISION}`);
+  push('página', location.protocol === 'file:' ? 'file:// (NÃO funciona — use o launcher)' : location.href);
+  push('userAgent', navigator.userAgent);
+  push('hardwareConcurrency', navigator.hardwareConcurrency ?? 'n/d');
+  push('deviceMemory', navigator.deviceMemory ? `${navigator.deviceMemory} GB` : 'n/d');
+  push('devicePixelRatio', window.devicePixelRatio);
+  push('viewport', `${el.viewportWrap?.clientWidth ?? '?'}×${el.viewportWrap?.clientHeight ?? '?'}`);
+  for (const [label, r] of [['viewport', renderer], ['sheet', sheetRenderer]]) {
+    if (!r) { push(`WebGL (${label})`, 'INDISPONÍVEL'); continue; }
+    const gl = r.getContext();
+    push(`WebGL (${label})`, gl.getParameter(gl.VERSION));
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    push(`GPU (${label})`, dbg ? `${gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)} — ${gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}` : 'driver não informa (WEBGL_debug_renderer_info ausente)');
+    push(`maxTextureSize (${label})`, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    push(`maxRenderbufferSize (${label})`, gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    if ('MAX_SAMPLES' in gl) push(`maxSamples (${label})`, gl.getParameter(gl.MAX_SAMPLES));
+    push(`contexto perdido (${label})`, r.getContext().isContextLost() ? 'SIM' : 'não');
+  }
+  if (glProblems.length) push('erros de WebGL', glProblems.join(' | '));
+  return lines.join('\n');
+}
+
+function showDiagnostics() {
+  el.diagBody.textContent = collectDiagnostics();
+  el.diagPanel.style.display = 'block';
+}
+function reportGlFailure(purpose, err) {
+  showError(
+    `Não consegui criar o contexto WebGL (${purpose}): ${err && err.message ? err.message : err}. ` +
+    'Sem WebGL não há como renderizar a spritesheet. Abra "Diagnóstico" para ver o que a GPU informa ' +
+    '(driver desatualizado e área de trabalho remota sem aceleração são as causas mais comuns).'
+  );
+  showDiagnostics();
+}
+
+// Declarado aqui (e não com const na seção 6) porque collectDiagnostics() lê os
+// dois contextos: se a criação do segundo falhar, o diagnóstico é chamado DENTRO
+// do inicializador dele, e um const ainda em TDZ lançaria ReferenceError no
+// lugar de explicar o problema.
+let sheetRenderer = null;
+
+const renderer = makeRenderer({ canvas: el.viewport, alpha: true, preserveDrawingBuffer: true, antialias: true }, 'viewport');
+if (renderer) {
+  renderer.setClearColor(0x000000, 0);
+  // Perder o contexto (troca de driver, suspensão, VRAM esgotada) deixa a tela
+  // congelada sem erro nenhum no console. Aqui ela passa a ter explicação.
+  el.viewport.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    glProblems.push('contexto do viewport perdido');
+    showError('A GPU perdeu o contexto do viewport (driver reiniciou, VRAM esgotada ou aba suspensa). Recarregue a página; o diagnóstico diz o que a GPU informou.');
+    showDiagnostics();
+  });
+}
 
 // Rig fixo no MUNDO: quando o modelo gira, a luz não gira junto — é isso que dá
 // a leitura de volume nos sprites (e o motivo de o turntable ser uma opção).
@@ -83,12 +172,40 @@ scene.add(rimLight);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x353b44, 0.45));
 
 // Direções normalizadas: a distância real é definida por fitRigToModel(), porque
-// luz em coordenadas fixas fica dentro de modelos grandes (e mata a sombra).
+// luz em coordenadas fixa fica dentro de modelos grandes (e mata a sombra).
 const LIGHT_RIG = [
   { light: keyLight, dir: new THREE.Vector3(4, 8, 6).normalize() },
   { light: fillLight, dir: new THREE.Vector3(-7, 3, 4).normalize() },
   { light: rimLight, dir: new THREE.Vector3(-3, 5, -8).normalize() }
 ];
+// "Luz presa à câmera": gira o rig inteiro junto com o que está se movendo em
+// relação ao observador (o modelo, no modo normal; a câmera, no turntable). Sem
+// isso cada direção recebe luz de um lado diferente — ótimo para volume, ruim
+// para ícone/prop, que é o que o checkbox oferece.
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const spinDirs = LIGHT_RIG.map((e) => e.dir.clone());
+const spinRig = LIGHT_RIG.map((e, i) => ({ light: e.light, dir: spinDirs[i] }));
+let lightFollowAz = 0;
+
+function lightCenter() {
+  return state.modelBox.isEmpty() ? new THREE.Vector3() : state.modelBox.getCenter(new THREE.Vector3());
+}
+
+/** Coloca o rig girado por spinRad (+ o acompanhamento da câmera). */
+function placeLights(spinRad, followAz = 0) {
+  const spin = spinRad + followAz;
+  for (let i = 0; i < LIGHT_RIG.length; i++) spinDirs[i].copy(LIGHT_RIG[i].dir).applyAxisAngle(UP_AXIS, spin);
+  const center = lightCenter();
+  core.placeLightRig(spinRig, center, state.modelRadius);
+  keyLight.target.position.copy(center);
+  keyLight.target.updateMatrixWorld();
+}
+
+/** Aplica os controles de luz do painel (chamado ao mudar qualquer um deles). */
+function applyLightRig() {
+  keyLight.intensity = (Number(el.rngLightInt.value) || 0) / 10;
+  placeLights(THREE.MathUtils.degToRad(Number(el.rngLightAz.value) || 0), lightFollowAz);
+}
 
 // Chão que só recebe sombra: com ShadowMaterial o fundo continua transparente.
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.35, color: 0x000000 }));
@@ -100,9 +217,8 @@ scene.add(ground);
 /** Ajusta luz de sombra + chão ao tamanho do modelo carregado. */
 function fitRigToModel() {
   const center = state.modelBox.getCenter(new THREE.Vector3());
-  const r = core.placeLightRig(LIGHT_RIG, center, state.modelRadius);
-  keyLight.target.position.copy(center);
-  keyLight.target.updateMatrixWorld();
+  applyLightRig();
+  const r = Math.max(state.modelRadius, 1e-3);
   ground.scale.set(r * 6, r * 6, 1);
   ground.position.set(center.x, state.modelBox.min.y, center.z);
 }
@@ -111,6 +227,7 @@ function fitRigToModel() {
  * 2. Viewport (preview)
  * ================================================================== */
 function resizeViewport() {
+  if (!renderer) return;
   const w = Math.max(1, el.viewportWrap.clientWidth);
   const h = Math.max(1, el.viewportWrap.clientHeight);
   renderer.setSize(w, h, false);
@@ -148,7 +265,7 @@ function tick() {
       el.scrubVal.textContent = `${(t * clip.duration).toFixed(2)}s`;
     }
   }
-  renderer.render(scene, previewCamera);
+  if (renderer) renderer.render(scene, previewCamera);
 }
 
 /* ================================================================== *
@@ -383,8 +500,137 @@ window.addEventListener('drop', (e) => {
 });
 
 /* ================================================================== *
- * 5. Controles
+ * 5. Abas, predefinições e controles
  * ================================================================== */
+
+/* ---- abas: 3D | Sheet + Player ----
+ * As duas janelas brigavam por espaço e tudo saía truncado. Agora cada uma tem
+ * a página inteira; a barra de progresso mora na própria barra de abas, então
+ * gerar a sheet não esconde o que está sendo feito. */
+function showTab(which) {
+  const results = which === 'results';
+  el.tabResults.setAttribute('aria-selected', String(results));
+  el.tab3d.setAttribute('aria-selected', String(!results));
+  el.resultPane.classList.toggle('on', results);
+  el.viewPane.classList.toggle('on', !results);
+  // Voltar ao 3D exige re-medir: com display:none o clientWidth era 0.
+  if (!results) resizeViewport();
+}
+el.tab3d.addEventListener('click', () => showTab('3d'));
+el.tabResults.addEventListener('click', () => showTab('results'));
+
+/* ---- predefinições por tipo de projeto + reset + memória ---- */
+const STORAGE_KEY = 'spriteforge.settings.v1';
+const presetButtons = [...document.querySelectorAll('.preset[data-preset]')];
+
+function markPreset(name) {
+  presetButtons.forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
+}
+
+/** Escreve um objeto de configurações em todos os controles do painel. */
+function applySettings(s) {
+  el.selDirections.value = String(s.directions);
+  el.rngFrames.value = String(s.frames);
+  el.framesVal.textContent = String(s.frames);
+  el.rngElevation.value = String(s.elevation);
+  el.elevationVal.textContent = `${s.elevation}°`;
+  el.rngAzimuth.value = String(s.azimuthOffset);
+  el.azimuthVal.textContent = `${s.azimuthOffset}°`;
+  el.selPivot.value = s.pivot;
+  el.rngCell.value = String(s.cell);
+  el.cellVal.textContent = `${s.cell} px`;
+  el.rngPadding.value = String(s.padding);
+  el.paddingVal.textContent = `${s.padding} px`;
+  el.chkSsaa.checked = !!s.ssaa;
+  el.chkLockScale.checked = !!s.lockScale;
+  el.rngScaleLock.value = String(s.pxPerUnit);
+  el.scaleLockVal.textContent = `${s.pxPerUnit} px/un`;
+  el.rowScaleLock.hidden = !s.lockScale;
+  el.chkTurntable.checked = !!s.turntable;
+  el.selBackground.value = s.background;
+  el.chkShadow.checked = !!s.shadow;
+  el.chkLoopPerfect.checked = !!s.loopPerfect;
+  el.rngFps.value = String(s.fps);
+  el.fpsVal.textContent = String(s.fps);
+  el.rngZoom.value = String(s.zoom);
+  el.zoomVal.textContent = `${s.zoom}x`;
+  el.rngGifScale.value = String(s.gifScale);
+  el.chkLightCamera.checked = !!s.lightCamera;
+  el.rngLightAz.value = String(s.lightAz);
+  el.lightAzVal.textContent = `${s.lightAz}°`;
+  el.rngLightInt.value = String(Math.round(s.lightIntensity * 10));
+  el.lightIntVal.textContent = (Number(s.lightIntensity) || 0).toFixed(1);
+  ground.visible = !!s.shadow;
+  applyLightRig();
+  framePreview();
+  drawPlayer();
+}
+
+/** Lê o painel de volta — é o que vai para o localStorage. */
+function readSettings() {
+  return {
+    directions: Number(el.selDirections.value),
+    frames: Number(el.rngFrames.value),
+    elevation: Number(el.rngElevation.value),
+    azimuthOffset: Number(el.rngAzimuth.value),
+    pivot: el.selPivot.value,
+    cell: Number(el.rngCell.value),
+    padding: Number(el.rngPadding.value),
+    ssaa: el.chkSsaa.checked,
+    lockScale: el.chkLockScale.checked,
+    pxPerUnit: Number(el.rngScaleLock.value),
+    turntable: el.chkTurntable.checked,
+    background: el.selBackground.value,
+    shadow: el.chkShadow.checked,
+    loopPerfect: el.chkLoopPerfect.checked,
+    fps: Number(el.rngFps.value),
+    zoom: Number(el.rngZoom.value),
+    gifScale: Number(el.rngGifScale.value),
+    lightCamera: el.chkLightCamera.checked,
+    lightAz: Number(el.rngLightAz.value),
+    lightIntensity: (Number(el.rngLightInt.value) || 0) / 10
+  };
+}
+
+function saveSettings(presetName) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ preset: presetName || null, settings: readSettings() }));
+  } catch (err) {
+    // Modo privado do Firefox e companhia lançam aqui; perder a memória é aceitável.
+    console.warn('não consegui salvar as preferências:', err.message);
+  }
+}
+
+function loadSavedSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object' || !data.settings) return null;
+    // Mescla com os defaults: uma preferência salva por uma versão antiga não
+    // pode deixar controles undefined.
+    return { preset: data.preset || null, settings: { ...core.DEFAULT_SETTINGS, ...data.settings } };
+  } catch (err) {
+    console.warn('preferências salvas ilegíveis, usando os padrões:', err.message);
+    return null;
+  }
+}
+
+presetButtons.forEach((btn) => btn.addEventListener('click', () => {
+  const name = btn.dataset.preset;
+  applySettings(core.presetSettings(name));
+  markPreset(name);
+  saveSettings(name);
+  setStatus(`predefinição "${btn.textContent.trim()}" aplicada — ajuste o que quiser e gere`, 'ok');
+}));
+
+el.btnReset.addEventListener('click', () => {
+  applySettings(core.DEFAULT_SETTINGS);
+  markPreset('default');
+  saveSettings('default');
+  setStatus('configurações de volta ao padrão do site', 'ok');
+});
+
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
 el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
 el.btnSample.addEventListener('click', loadSample);
@@ -404,10 +650,58 @@ el.scrub.addEventListener('input', () => {
 });
 el.chkShadow.addEventListener('change', () => { ground.visible = el.chkShadow.checked; });
 el.rngElevation.addEventListener('input', () => { el.elevationVal.textContent = `${el.rngElevation.value}°`; framePreview(); });
+el.rngAzimuth.addEventListener('input', () => { el.azimuthVal.textContent = `${el.rngAzimuth.value}°`; });
+el.rngPadding.addEventListener('input', () => { el.paddingVal.textContent = `${el.rngPadding.value} px`; });
+el.chkLockScale.addEventListener('change', () => { el.rowScaleLock.hidden = !el.chkLockScale.checked; });
+el.rngScaleLock.addEventListener('input', () => { el.scaleLockVal.textContent = `${el.rngScaleLock.value} px/un`; });
+el.rngLightAz.addEventListener('input', () => { el.lightAzVal.textContent = `${el.rngLightAz.value}°`; applyLightRig(); });
+el.rngLightInt.addEventListener('input', () => { el.lightIntVal.textContent = ((Number(el.rngLightInt.value) || 0) / 10).toFixed(1); applyLightRig(); });
+el.chkLightCamera.addEventListener('change', applyLightRig);
 el.rngFrames.addEventListener('input', () => { el.framesVal.textContent = el.rngFrames.value; });
 el.rngCell.addEventListener('input', () => { el.cellVal.textContent = `${el.rngCell.value} px`; });
 el.rngFps.addEventListener('input', () => { el.fpsVal.textContent = el.rngFps.value; });
 el.rngZoom.addEventListener('input', () => { el.zoomVal.textContent = `${el.rngZoom.value}x`; drawPlayer(); });
+
+// Qualquer ajuste manual invalida a predefinição destacada e vai para a memória.
+const SETTING_CONTROLS = [
+  el.selDirections, el.rngFrames, el.rngElevation, el.rngAzimuth, el.selPivot, el.rngCell,
+  el.rngPadding, el.chkSsaa, el.chkLockScale, el.rngScaleLock, el.chkTurntable, el.selBackground,
+  el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale,
+  el.chkLightCamera, el.rngLightAz, el.rngLightInt
+];
+SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => { markPreset(null); saveSettings(null); }));
+
+/* ---- diagnóstico ---- */
+el.btnDiag.addEventListener('click', () => {
+  const aberto = el.diagPanel.style.display === 'block';
+  if (aberto) el.diagPanel.style.display = 'none';
+  else showDiagnostics();
+});
+el.btnCloseDiag.addEventListener('click', () => { el.diagPanel.style.display = 'none'; });
+el.btnCopyDiag.addEventListener('click', async () => {
+  const texto = collectDiagnostics();
+  try {
+    await navigator.clipboard.writeText(texto);
+    setStatus('diagnóstico copiado — cole onde for pedir ajuda', 'ok');
+  } catch {
+    // Clipboard API exige contexto seguro/https; o fallback funciona em http local.
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    document.body.appendChild(ta);
+    ta.select();
+    const foi = document.execCommand('copy');
+    ta.remove();
+    setStatus(foi ? 'diagnóstico copiado' : 'não consegui copiar — selecione o texto do painel', foi ? 'ok' : 'err');
+  }
+});
+
+/* ---- cancelar geração ---- */
+el.btnCancel.addEventListener('click', () => {
+  if (!state.generating) return;
+  state.cancelled = true;
+  el.btnCancel.disabled = true;
+  setStatus('cancelando após a célula atual…', 'err');
+});
 
 
 /* ================================================================== *
@@ -418,11 +712,17 @@ el.rngZoom.addEventListener('input', () => { el.zoomVal.textContent = `${el.rngZ
 // para o tamanho da célula sem deformar o preview, então a sheet sai de um
 // segundo contexto — que reutiliza a MESMA cena (mesmo rig de luz, mesmo chão).
 // preserveDrawingBuffer é obrigatório para o drawImage() depois do render.
-const sheetRenderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true, antialias: true });
-sheetRenderer.setPixelRatio(1);
-sheetRenderer.shadowMap.enabled = true;
-sheetRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-sheetRenderer.toneMapping = THREE.NoToneMapping;
+// Também protegido: este é o contexto que faz o trabalho pesado (uma célula de
+// 512px com SSAA vira um framebuffer de 1024px), e é nele que a VRAM acaba.
+sheetRenderer = makeRenderer({ alpha: true, preserveDrawingBuffer: true, antialias: true }, 'sheet');
+if (sheetRenderer) {
+  sheetRenderer.domElement.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    glProblems.push('contexto da sheet perdido');
+    showError('A GPU perdeu o contexto usado para gerar a sheet (VRAM esgotada é a causa mais comum). Reduza a célula ou desligue o SSAA e tente de novo.');
+    showDiagnostics();
+  });
+}
 
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 const showProgress = (on) => el.progressWrap.classList.toggle('on', on);
@@ -432,25 +732,45 @@ const setProgress = (ratio, label) => {
 };
 
 function applyBackground(mode) {
+  if (!sheetRenderer) return;
   if (mode === 'white') sheetRenderer.setClearColor(0xffffff, 1);
   else if (mode === 'dark') sheetRenderer.setClearColor(0x15181d, 1);
   else sheetRenderer.setClearColor(0x000000, 0);
 }
 
+/** Cancelamento pedido pelo usuário: não é falha, tem mensagem própria. */
+class CancelledError extends Error {
+  constructor() { super('geração cancelada'); this.name = 'AbortError'; }
+}
+
 async function generate() {
   if (!state.model) { setStatus('carregue um modelo antes de gerar', 'err'); return; }
   if (state.generating) return;
+  if (!sheetRenderer) {
+    setStatus('sem contexto WebGL não há como gerar — abra "Diagnóstico" para ver o que a GPU informou', 'err');
+    showDiagnostics();
+    return;
+  }
 
   const dirCount = Number(el.selDirections.value);
   const elevation = Number(el.rngElevation.value);
+  const azimuthOffset = Number(el.rngAzimuth.value) || 0;
+  const pivot = el.selPivot.value;
+  const padding = Number(el.rngPadding.value) || 0;
+  const lockScale = el.chkLockScale.checked;
+  const pxPerUnit = Number(el.rngScaleLock.value) || 8;
   const turntable = el.chkTurntable.checked;
-  const ssaa = el.chkSsaa.checked;
   const background = el.selBackground.value;
   const fps = Number(el.rngFps.value) || core.DEFAULT_FPS;
+  const lightAz = THREE.MathUtils.degToRad(Number(el.rngLightAz.value) || 0);
+  const lightFollow = el.chkLightCamera.checked;
   const clip = state.clips[state.clipIndex] || null;
+  const warnings = [];
 
   state.generating = true;
+  state.cancelled = false;
   el.btnGenerate.disabled = true;
+  el.btnCancel.disabled = false;
   showProgress(true);
   setProgress(0, 'preparando…');
   const wasPlaying = state.playing;
@@ -464,7 +784,10 @@ async function generate() {
     // 1. poses (uma por célula) e tempos de frame
     const frameCount = clip ? Number(el.rngFrames.value) : 1;
     const times = core.frameTimes(clip ? clip.duration : 0, frameCount, el.chkLoopPerfect.checked);
-    const poses = core.buildPoses({ directionCount: dirCount, frameCount: times.length, times, model: state.model, turntable });
+    const poses = core.buildPoses({
+      directionCount: dirCount, frameCount: times.length, times,
+      model: state.model, turntable, azimuthOffsetDeg: azimuthOffset
+    });
 
     const applyPose = (pose) => {
       state.model.rotation.y = pose.modelAzimuth;
@@ -477,32 +800,65 @@ async function generate() {
     await yieldToBrowser();
     const fit = core.measureFit(core.fitPoses(poses, { maxFrames: 6, maxDirections: 4 }), applyPose, { elevationDeg: elevation });
     if (!fit) throw new Error('não consegui medir o modelo (geometria vazia?)');
+    const frame = core.frameForPivot(fit.bounds, pivot);
 
-    // 3. layout (linhas = direções, colunas = frames) + clamp de 8192 px
-    const layout = core.computeLayout(dirCount, times.length, Number(el.rngCell.value));
-    if (layout.warning) setStatus(layout.warning, 'err');
+    // 3. layout (linhas = direções, colunas = frames) + padding + clamp de 8192 px
+    const layout = core.computeLayout(dirCount, times.length, Number(el.rngCell.value), core.MAX_SHEET_SIDE, padding);
+    if (layout.warning) warnings.push(layout.warning);
+
+    // 3b. Escala travada: o half deixa de vir da medição e passa a vir de
+    // "quantos pixels vale uma unidade de mundo", para que modelos diferentes
+    // saiam do mesmo tamanho. Se o modelo não couber, avisa em vez de cortar mudo.
+    let half = frame.half;
+    if (lockScale) {
+      half = layout.cell / (2 * pxPerUnit);
+      if (frame.half > half) {
+        warnings.push(
+          `escala travada em ${pxPerUnit} px/unidade corta o modelo: ele precisaria de half ${frame.half.toFixed(2)} e coube ${half.toFixed(2)}. ` +
+          'Diminua px/unidade, aumente a célula ou desligue a trava.'
+        );
+      }
+    }
+
+    // 3c. SSAA limitado ao que ESTA GPU aceita: célula 512 com SSAA 2x = 1024px
+    // de framebuffer, e maxTextureSize é 4096 em muita placa — acima disso o
+    // render falha em silêncio ou estoura o contexto.
+    const maxTex = sheetRenderer.capabilities.maxTextureSize || 4096;
+    let ssaa = el.chkSsaa.checked;
+    let renderSize = layout.cell * (ssaa ? 2 : 1);
+    if (renderSize > maxTex) {
+      warnings.push(`SSAA desligado: ${renderSize}px de framebuffer passa do maxTextureSize desta GPU (${maxTex}px)`);
+      ssaa = false;
+      renderSize = layout.cell;
+    }
 
     // 4. canvas da sheet e renderer offscreen
     const sheet = document.createElement('canvas');
     sheet.width = layout.w;
     sheet.height = layout.h;
-    const sctx = sheet.getContext('2d');
-    const renderSize = layout.cell * (ssaa ? 2 : 1);
+    const sctx = sheet.getContext('2d', { willReadFrequently: true });
     sheetRenderer.setSize(renderSize, renderSize, false);
     applyBackground(background);
     ground.visible = el.chkShadow.checked;
 
-    const camera = core.createOrthoCamera({ half: fit.half, center: fit.center, elevationDeg: elevation });
+    const camera = core.createOrthoCamera({ half, center: fit.center, elevationDeg: elevation });
+    core.applyPivotOffset(camera, { cx: frame.cx, cy: frame.cy, half });
     const distance = camera.position.distanceTo(fit.center);
 
     // 5. render célula a célula (row = direção, col = frame)
     let done = 0;
     for (const pose of poses) {
+      if (state.cancelled) throw new CancelledError();
       applyPose(pose);
+      // Luz presa à câmera gira junto com o que se move em relação ao
+      // observador: o modelo, no modo normal; a câmera, no turntable.
+      lightFollowAz = lightFollow ? (turntable ? pose.camAzimuth : pose.modelAzimuth) : 0;
+      placeLights(lightAz, lightFollowAz);
       core.placeCamera(camera, fit.center, pose.camAzimuth, elevation, distance);
       sheetRenderer.render(scene, camera);
       // SSAA 2x: o drawImage reduz de 2× para 1× e já faz o downsample.
-      sctx.drawImage(sheetRenderer.domElement, pose.frame * layout.cell, pose.dir * layout.cell, layout.cell, layout.cell);
+      const rect = core.cellRect(layout, pose.dir, pose.frame);
+      sctx.drawImage(sheetRenderer.domElement, rect.x, rect.y, rect.w, rect.h);
       done++;
       setProgress(done / poses.length, `renderizando ${done}/${poses.length} — dir ${String(pose.dir).padStart(2, '0')}, frame ${pose.frame + 1}`);
       await yieldToBrowser();
@@ -512,33 +868,50 @@ async function generate() {
     const meta = core.buildMetadata({
       baseName: `${state.name}_${clip ? clip.name : 'static'}`,
       layout, directionCount: dirCount, elevationDeg: elevation, times, fps,
-      loop: el.chkLoopPerfect.checked, ssaa, turntable, background
+      loop: el.chkLoopPerfect.checked, ssaa, turntable, background,
+      azimuthOffsetDeg: azimuthOffset, pivot, lockScale, pxPerUnit: lockScale ? pxPerUnit : null
     });
     const aseprite = core.buildAsepriteJson(meta);
 
-    state.result = { layout, meta, aseprite, sheet, fps, fit, dirCount, turntable };
+    state.result = { layout, meta, aseprite, sheet, fps, fit, frame, dirCount, turntable, half };
     state.player.dir = 0;
     state.player.frame = 0;
-    el.results.classList.add('on');
-    el.sheetInfo.textContent = `${layout.w}×${layout.h} px · ${layout.cols} frames × ${layout.rows} direções · célula ${layout.cell}px${ssaa ? ' · SSAA 2x' : ''} · half=${fit.half.toFixed(2)}`;
-    el.jsonInfo.textContent = `${meta.image} · ${Object.keys(meta.frames).length} frames · ${fps} fps · elevação ${elevation}° · ${turntable ? 'turntable' : 'modelo girando'}`;
+    showTab('results');
+    el.sheetInfo.textContent =
+      `${layout.w}×${layout.h} px · ${layout.cols} frames × ${layout.rows} direções · célula ${layout.cell}px` +
+      (layout.padding ? ` + ${layout.padding}px de vão` : '') +
+      (ssaa ? ' · SSAA 2x' : '') +
+      ` · half=${half.toFixed(2)} · pivot ${pivot}`;
+    el.jsonInfo.textContent =
+      `${meta.image} · ${Object.keys(meta.frames).length} frames · ${fps} fps · elevação ${elevation}°` +
+      (azimuthOffset ? ` · frente ${azimuthOffset}°` : '') +
+      ` · ${turntable ? 'turntable' : 'modelo girando'}` +
+      (lockScale ? ` · ${pxPerUnit} px/unidade` : '');
     drawSheetPreview();
     buildDirectionSelector();
     drawPlayer();
     el.gifList.innerHTML = '';
-    setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)`, 'ok');
+    if (warnings.length) setStatus(warnings.join(' · '), 'err');
+    else setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)`, 'ok');
   } catch (err) {
-    console.error(err);
-    setStatus(`falha na geração: ${err.message}`, 'err');
+    if (err && err.name === 'AbortError') setStatus('geração cancelada — a sheet anterior continua válida', 'err');
+    else {
+      console.error(err);
+      setStatus(`falha na geração: ${err.message}`, 'err');
+    }
   } finally {
     state.model.rotation.y = prevRotation;
     if (state.mixer && clip) state.mixer.setTime(prevTime);
     state.model.updateMatrixWorld(true);
-    renderer.setClearColor(0x000000, 0);
+    lightFollowAz = 0;
+    applyLightRig();
+    if (renderer) renderer.setClearColor(0x000000, 0);
     state.generating = false;
+    state.cancelled = false;
     state.playing = wasPlaying;
     el.btnPlay.textContent = state.playing ? 'Pause' : 'Play';
     el.btnGenerate.disabled = false;
+    el.btnCancel.disabled = true;
     showProgress(false);
   }
 }
@@ -558,12 +931,16 @@ function drawSheetPreview() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(r.sheet, 0, 0);
   if (el.chkGrid.checked) {
+    // Retângulo por célula (e não linhas a cada N px): com padding as linhas
+    // saíriam do lugar.
     ctx.strokeStyle = 'rgba(77,163,255,0.6)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = 0; x <= r.layout.w; x += r.layout.cell) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, r.layout.h); }
-    for (let y = 0; y <= r.layout.h; y += r.layout.cell) { ctx.moveTo(0, y + 0.5); ctx.lineTo(r.layout.w, y + 0.5); }
-    ctx.stroke();
+    ctx.lineWidth = Math.max(1, r.layout.cell / 128);
+    for (let d = 0; d < r.layout.rows; d++) {
+      for (let f = 0; f < r.layout.cols; f++) {
+        const rect = core.cellRect(r.layout, d, f);
+        ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      }
+    }
   }
 }
 el.chkGrid.addEventListener('change', drawSheetPreview);
@@ -585,17 +962,34 @@ function buildDirectionSelector() {
   el.playerDir.value = String(state.player.dir);
 }
 
+/** Caixa fixa do player: o tamanho vem do CSS, não do zoom. */
+const PLAYER_BOX = 256;
+
+/**
+ * Desenha o quadro atual no player.
+ *
+ * O zoom é uma LUPA dentro da caixa fixa: o que muda é o pedaço da célula
+ * recortado (cell/zoom), não o tamanho do canvas. Antes o canvas crescia junto
+ * com o zoom e empurrava o layout inteiro — por isso "quebrava a formatação".
+ */
 function drawPlayer() {
   const r = state.result;
   if (!r) return;
-  const zoom = Number(el.rngZoom.value) || 1;
+  const zoom = Math.max(1, Number(el.rngZoom.value) || 1);
   const cell = r.layout.cell;
   const canvas = el.playerCanvas;
-  if (canvas.width !== cell * zoom) { canvas.width = cell * zoom; canvas.height = cell * zoom; }
+  if (canvas.width !== PLAYER_BOX || canvas.height !== PLAYER_BOX) {
+    canvas.width = PLAYER_BOX;
+    canvas.height = PLAYER_BOX;
+  }
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(r.sheet, state.player.frame * cell, state.player.dir * cell, cell, cell, 0, 0, cell * zoom, cell * zoom);
+  ctx.imageSmoothingEnabled = false;   // pixel art: ampliar tem de continuar quadrado
+  ctx.clearRect(0, 0, PLAYER_BOX, PLAYER_BOX);
+  const rect = core.cellRect(r.layout, state.player.dir, state.player.frame);
+  const lado = cell / zoom;
+  const sx = rect.x + (cell - lado) / 2;
+  const sy = rect.y + (cell - lado) / 2;
+  ctx.drawImage(r.sheet, sx, sy, lado, lado, 0, 0, PLAYER_BOX, PLAYER_BOX);
 }
 
 function playerTick(ts) {
@@ -645,40 +1039,131 @@ el.dlAseprite.addEventListener('click', () => {
   if (r) downloadBlob(jsonBlob(r.aseprite), r.meta.image.replace(/_sheet\.png$/, '.aseprite.json'));
 });
 
+/**
+ * Codifica os GIFs de todas as direções.
+ * `rngGifScale` reduz a célula antes de quantizar: GIF é 256 cores por quadro,
+ * então um sprite de 512px desperdiça paleta — e o arquivo fica enorme.
+ */
+async function buildGifs(r, sctx, delay) {
+  const scale = Number(el.rngGifScale.value) || 1;
+  const cell = r.layout.cell;
+  const size = Math.max(1, Math.round(cell * scale));
+  const tmp = document.createElement('canvas');
+  tmp.width = size;
+  tmp.height = size;
+  const tctx = tmp.getContext('2d', { willReadFrequently: true });
+  tctx.imageSmoothingEnabled = scale > 1;   // reduzir suaviza; ampliar fica vizinho mais próximo
+  const out = [];
+  for (let d = 0; d < r.dirCount; d++) {
+    const frames = [];
+    for (let f = 0; f < r.layout.cols; f++) {
+      const rect = core.cellRect(r.layout, d, f);
+      tctx.clearRect(0, 0, size, size);
+      tctx.drawImage(r.sheet, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
+      frames.push(tctx.getImageData(0, 0, size, size).data);
+    }
+    out.push({ dir: d, size, bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay) }) });
+    setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
+    await yieldToBrowser();
+  }
+  return out;
+}
+
+/** Tudo o que o ZIP leva, com a receita de uso dentro. */
+function readmeDoZip(r) {
+  const m = r.meta;
+  return [
+    'SpriteForge Web — conteúdo deste pacote',
+    '======================================',
+    '',
+    `${m.image}: ${m.size.w}x${m.size.h} px, ${m.grid.cols} colunas (frames) x ${m.grid.rows} linhas (direcoes), celula ${m.cell.w}px` +
+      (m.cell.padding ? ` com ${m.cell.padding}px de vao` : ''),
+    `pivot: x=${m.pivot.x} y=${m.pivot.y} (normalizado dentro da celula, y medido do topo)`,
+    `direcoes: ${m.directions.count}, passo ${m.directions.angle_step_deg} graus, frente em ${m.directions.angle_offset_deg} graus`,
+    `animacao: ${m.animation.count} frames a ${m.animation.fps} fps, loop=${m.animation.loop}`,
+    '',
+    'Godot 4: AnimatedSprite2D + SpriteFrames -> "Add frames from Sprite Sheet",',
+    `  cols=${m.grid.cols}, rows=${m.grid.rows}; em Offset use (0.5 - pivot.x, 0.5 - pivot.y) * tamanho da celula.`,
+    '',
+    'Unity: Sprite Mode = Multiple, Sprite Editor -> Grid By Cell Count',
+    `  (${m.grid.cols}x${m.grid.rows}); Pivot = Custom, em pixels: (pivot.x * ${m.cell.w}, (1 - pivot.y) * ${m.cell.h}).`,
+    '',
+    'Aseprite: File > Import Sprite Sheet, usando o .aseprite.json (ja traz as tags dirNN e o anchor).',
+    '',
+    'Os GIFs em gif/ sao so para conferencia visual: GIF tem 256 cores por quadro e',
+    'nao guarda alpha de verdade (usa o indice 0). Para o jogo use o PNG + metadata.'
+  ].join('\n');
+}
+
+/** Baixa tudo de uma vez: sheet + metadata + sidecar + GIFs + LEIA-ME. */
+async function downloadZip() {
+  const r = state.result;
+  if (!r) { setStatus('gere a sheet antes de baixar o .zip', 'err'); return; }
+  const base = r.meta.image.replace(/_sheet\.png$/, '');
+  el.dlZip.disabled = true;
+  showProgress(true);
+  try {
+    setProgress(0.1, 'empacotando a sheet…');
+    await yieldToBrowser();
+    const pngBlob = await new Promise((resolve) => r.sheet.toBlob(resolve, 'image/png'));
+    if (!pngBlob) throw new Error('o canvas não virou PNG (canvas grande demais?)');
+    const files = {
+      [r.meta.image]: new Uint8Array(await pngBlob.arrayBuffer()),
+      [`${base}_metadata.json`]: strToU8(JSON.stringify(r.meta, null, 2)),
+      [`${base}.aseprite.json`]: strToU8(JSON.stringify(r.aseprite, null, 2)),
+      'LEIA-ME.txt': strToU8(readmeDoZip(r))
+    };
+    setProgress(0.35, 'codificando os GIFs…');
+    const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
+    const gifs = await buildGifs(r, r.sheet.getContext('2d', { willReadFrequently: true }), delay);
+    for (const g of gifs) files[`gif/${base}_dir${String(g.dir).padStart(2, '0')}.gif`] = g.bytes;
+    setProgress(0.9, 'zipando…');
+    await yieldToBrowser();
+    const zip = zipSync(files, { level: 6 });
+    downloadBlob(new Blob([zip], { type: 'application/zip' }), `${base}_spriteforge.zip`);
+    setStatus(`zip pronto: ${(zip.length / 1024).toFixed(0)} KB, ${Object.keys(files).length} arquivos`, 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus(`falha no zip: ${err.message}`, 'err');
+  } finally {
+    el.dlZip.disabled = false;
+    showProgress(false);
+  }
+}
+el.dlZip.addEventListener('click', downloadZip);
+
 async function generateGifs() {
   const r = state.result;
   if (!r) { setStatus('gere a sheet antes dos GIFs', 'err'); return; }
   const base = r.meta.image.replace(/_sheet\.png$/, '');
-  const cell = r.layout.cell;
   const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
-  const sctx = r.sheet.getContext('2d');
+  const sctx = r.sheet.getContext('2d', { willReadFrequently: true });
   el.btnGif.disabled = true;
   el.gifList.innerHTML = '';
+  for (const url of state.gifUrls.values()) URL.revokeObjectURL(url);
+  state.gifUrls.clear();
   showProgress(true);
   try {
-    for (let d = 0; d < r.dirCount; d++) {
-      const frames = [];
-      for (let f = 0; f < r.layout.cols; f++) frames.push(sctx.getImageData(f * cell, d * cell, cell, cell).data);
-      const bytes = core.encodeGif({ width: cell, height: cell, frames, delays: frames.map(() => delay) });
+    const gifs = await buildGifs(r, sctx, delay);
+    for (const { dir, bytes, size } of gifs) {
       const url = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
+      state.gifUrls.set(dir, url);
       const fig = document.createElement('figure');
       fig.className = 'gifItem';
       const img = document.createElement('img');
       img.src = url;
-      img.width = cell;
-      img.height = cell;
+      img.width = size;
+      img.height = size;
       const cap = document.createElement('figcaption');
-      cap.textContent = `dir${String(d).padStart(2, '0')}`;
+      cap.textContent = `dir${String(dir).padStart(2, '0')} · ${size}px`;
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${base}_dir${String(d).padStart(2, '0')}.gif`;
+      link.download = `${base}_dir${String(dir).padStart(2, '0')}.gif`;
       link.textContent = 'baixar';
       fig.append(img, cap, link);
       el.gifList.appendChild(fig);
-      setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
-      await yieldToBrowser();
     }
-    setStatus(`${r.dirCount} GIFs prontos — transparência por índice 0 (magenta)`, 'ok');
+    setStatus(`${r.dirCount} GIFs prontos (${gifs[0].size}px) — transparência por índice 0 (magenta)`, 'ok');
   } catch (err) {
     console.error(err);
     setStatus(`falha no GIF: ${err.message}`, 'err');
@@ -693,7 +1178,18 @@ el.btnGif.addEventListener('click', generateGifs);
  * 10. Boot
  * ================================================================== */
 el.fileInput.accept = core.ACCEPT_ATTR;
+el.btnCancel.disabled = true;
+const salvo = loadSavedSettings();
+applySettings(salvo ? salvo.settings : core.DEFAULT_SETTINGS);
+markPreset(salvo && salvo.preset ? salvo.preset : 'default');
+showTab('3d');
 resizeViewport();
 tick();
 requestAnimationFrame(playerTick);
-setStatus('pronto — arraste um .glb, use "Abrir" ou carregue o exemplo (Fox)');
+if (glProblems.length) setStatus(`WebGL com problema — ${glProblems.join(' | ')}`, 'err');
+else {
+  setStatus(
+    'pronto — arraste um modelo (.glb, .gltf, .obj, .fbx, .stl, .ply), use "Abrir" ou carregue o exemplo (Fox)' +
+      (salvo ? ' · suas preferências foram restauradas' : '')
+  );
+}

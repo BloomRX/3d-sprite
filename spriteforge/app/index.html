@@ -8,6 +8,7 @@
   :root{
     --bg:#14171c; --panel:#1d222a; --panel2:#232a34; --line:#333c48;
     --fg:#e8edf3; --mut:#93a1b1; --acc:#4da3ff; --ok:#48c78e; --warn:#f5a524; --err:#ff6b6b;
+    --aside:320px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -17,20 +18,26 @@
     display:flex; flex-direction:column; overflow:hidden;
   }
   header{
-    display:flex; align-items:center; gap:12px; padding:8px 12px;
-    background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto;
+    display:flex; align-items:center; gap:10px; padding:7px 12px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto; flex-wrap:wrap;
   }
-  header h1{font-size:14px; margin:0; letter-spacing:.3px}
+  header h1{font-size:14px; margin:0; letter-spacing:.3px; white-space:nowrap}
   header h1 span{color:var(--acc)}
-  header .spacer{flex:1}
+  header .spacer{flex:1 1 40px}
   main{flex:1 1 auto; display:flex; min-height:0}
+
+  /* ---------- painel de controles ---------- */
   aside{
-    flex:0 0 300px; overflow:auto; background:var(--panel);
+    flex:0 0 var(--aside); overflow-y:auto; overflow-x:hidden; background:var(--panel);
     border-right:1px solid var(--line); padding:10px;
   }
-  section.stage{flex:1 1 auto; display:flex; flex-direction:column; min-width:0}
   .row{display:flex; gap:8px; align-items:center; margin:6px 0}
+  /* .row tem display:flex, que ganha do [hidden] do user agent: sem esta regra o
+     atributo hidden não esconderia nada. */
+  .row[hidden]{display:none}
   .row.wrap{flex-wrap:wrap}
+  .row > label:first-child{flex:0 0 74px; color:var(--mut)}
+  .row.tight > label:first-child{flex:0 0 58px}
   label{color:var(--mut)}
   fieldset{
     border:1px solid var(--line); border-radius:6px; margin:0 0 10px; padding:8px;
@@ -45,16 +52,41 @@
   button:disabled{opacity:.45; cursor:not-allowed}
   button.primary{background:var(--acc); border-color:var(--acc); color:#06131f; font-weight:600}
   button.primary:hover{filter:brightness(1.1)}
+  button.danger{background:#5a2530; border-color:#7d3543}
+  button.mini{padding:3px 7px; font-size:11px}
+  button.preset[aria-pressed="true"]{background:var(--acc); border-color:var(--acc); color:#06131f; font-weight:600}
   select, input[type=number]{background:#2b3441; color:var(--fg); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit}
-  input[type=range]{width:100%}
+  select{flex:1 1 auto; min-width:0}
+  input[type=range]{flex:1 1 auto; min-width:60px}
   input[type=checkbox]{accent-color:var(--acc)}
-  .val{color:var(--fg); font-variant-numeric:tabular-nums; min-width:52px; text-align:right}
+  .val{color:var(--fg); font-variant-numeric:tabular-nums; min-width:50px; text-align:right; font-size:12px}
+
+  /* ---------- palco com abas ---------- */
+  section.stage{flex:1 1 auto; display:flex; flex-direction:column; min-width:0}
+  nav.tabs{
+    flex:0 0 auto; display:flex; gap:6px; align-items:center; padding:6px 10px;
+    background:var(--panel); border-bottom:1px solid var(--line);
+  }
+  nav.tabs button[aria-selected="true"]{background:var(--acc); border-color:var(--acc); color:#06131f; font-weight:600}
+  nav.tabs .spacer{flex:1}
+  button.preset.on{background:var(--acc); border-color:var(--acc); color:#06131f; font-weight:600}
+  #progressWrap{display:none; flex:1 1 180px; min-width:120px}
+  #progressWrap.on{display:block}
+  #progressTrack{height:8px; background:#2b3441; border-radius:4px; overflow:hidden}
+  #progressBar{height:100%; width:0; background:var(--acc); transition:width .08s linear}
+  #progressLabel{color:var(--mut); font-size:11px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .pane{flex:1 1 auto; min-height:0; overflow:auto; display:none}
+  .pane.on{display:block}
+  #viewPane{overflow:hidden; display:none}
+  #viewPane.on{display:flex}
+  #resultPane{padding:10px; background:var(--bg)}
+
   #viewportWrap{
     position:relative; flex:1 1 auto; min-height:0; overflow:hidden;
     background:
       conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/20px 20px;
   }
-  #viewport{display:block; width:100%; height:100%}
+  #viewport{display:block; width:100%; height:100%; touch-action:none}
   .badge{
     position:absolute; left:8px; top:8px; padding:3px 7px; border-radius:4px;
     background:rgba(10,13,17,.72); color:var(--mut); font-size:11px; pointer-events:none;
@@ -63,49 +95,60 @@
   #dropHint{
     position:absolute; inset:0; display:none; place-items:center; z-index:5;
     background:rgba(10,13,17,.82); border:2px dashed var(--acc); color:var(--acc);
-    font-size:15px; pointer-events:none;
+    font-size:15px; pointer-events:none; text-align:center;
   }
   body.dragging #dropHint{display:grid}
-  #progressWrap{display:none; padding:8px 12px; background:var(--panel); border-top:1px solid var(--line)}
-  #progressWrap.on{display:block}
-  #progressTrack{height:8px; background:#2b3441; border-radius:4px; overflow:hidden}
-  #progressBar{height:100%; width:0; background:var(--acc); transition:width .08s linear}
-  #progressLabel{color:var(--mut); font-size:11px; margin-top:4px}
-  #results{
-    flex:0 0 auto; max-height:44%; overflow:auto; background:var(--panel);
-    border-top:1px solid var(--line); padding:10px; display:none;
+  #loadError{
+    display:none; position:absolute; left:8px; right:8px; bottom:8px; z-index:6;
+    background:#3a1418; border:1px solid var(--err); color:#ffd7d7;
+    border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.4;
   }
-  #results.on{display:block}
-  .sheetBox{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start}
+
+  /* ---------- resultados ---------- */
+  .sheetBox{display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start}
   .canvasFrame{
     background:
       conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/16px 16px;
     border:1px solid var(--line); border-radius:4px; padding:2px; max-width:100%;
   }
   canvas.out{image-rendering:pixelated; max-width:100%; height:auto; display:block}
-  #status{
-    flex:0 0 auto; padding:4px 12px; background:#101317; border-top:1px solid var(--line);
-    color:var(--mut); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  #status.err{color:var(--err)} #status.ok{color:var(--ok)}
+  /* Player: caixa FIXA. O zoom é uma lupa desenhada dentro dela, então mudar o
+     zoom nunca reflowa o layout (era o bug relatado). */
+  #playerFrame{width:256px; height:256px; flex:0 0 auto; display:flex}
+  #playerCanvas{width:100%; height:100%; image-rendering:pixelated; display:block}
+
   .gifItem{display:inline-block; margin:4px 6px 0 0; text-align:center}
   .gifItem figcaption{color:var(--mut); font-size:10px}
   .gifItem img{image-rendering:pixelated; background:
       conic-gradient(from 90deg at 50% 50%, #2a2f37 0 25%, #22262d 0 50%, #2a2f37 0 75%, #22262d 0) 0 0/12px 12px;
       border:1px solid var(--line); border-radius:3px}
+
+  #status{
+    flex:0 0 auto; padding:4px 12px; background:#101317; border-top:1px solid var(--line);
+    color:var(--mut); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  #status.err{color:var(--err)} #status.ok{color:var(--ok)}
   code{background:#101317; padding:1px 4px; border-radius:3px}
   .hint{color:var(--mut); font-size:11px}
-  #loadError{
-    display:none; position:absolute; left:8px; right:8px; bottom:8px; z-index:6;
-    background:#3a1418; border:1px solid var(--err); color:#ffd7d7;
-    border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.4;
-  }
   #fileWarning{
     display:none; margin:0; padding:14px 18px; background:#3a2a10;
     border-bottom:2px solid var(--warn); color:#ffe6b8; font-size:13px; line-height:1.5;
   }
   #fileWarning code{background:#221803; color:#ffd27a}
   #fileWarning b{color:#fff}
+
+  /* ---------- diagnóstico ---------- */
+  #diagPanel{
+    display:none; position:fixed; right:14px; top:52px; width:min(520px, calc(100vw - 28px));
+    max-height:70vh; overflow:auto; z-index:20;
+    background:#12161b; border:1px solid var(--line); border-radius:8px; padding:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  #diagPanel.on{display:block}
+  #diagBody{
+    font:11px/1.5 ui-monospace,Consolas,Menlo,monospace; white-space:pre-wrap; word-break:break-word;
+    color:#c9d6e3; background:#0b0e12; border:1px solid var(--line); border-radius:5px; padding:8px;
+  }
 </style>
 </head>
 <body>
@@ -117,88 +160,118 @@
   Linux/macOS: <code>./SpriteForge.sh</code>.
   Manual: <code>py -m http.server 8080 --directory spriteforge\app</code>
 </p>
+
 <header>
   <h1>Sprite<span>Forge</span> Web</h1>
   <span class="hint" id="modelInfo">nenhum modelo carregado — .glb .gltf .obj .fbx .stl .ply</span>
   <div class="spacer"></div>
   <input type="file" id="fileInput" multiple hidden>
-  <button id="btnOpen">Abrir .glb/.gltf</button>
-  <button id="btnSample">Carregar exemplo (Fox)</button>
+  <button id="btnOpen">Abrir modelo</button>
+  <button id="btnSample">Exemplo (Fox)</button>
+  <button id="btnDiag" title="Ambiente, limites da GPU e último erro">Diagnóstico</button>
 </header>
+
+<div id="diagPanel">
+  <div class="row">
+    <strong style="flex:1">Diagnóstico</strong>
+    <button id="btnCopyDiag" class="mini">copiar</button>
+    <button id="btnCloseDiag" class="mini">fechar</button>
+  </div>
+  <div id="diagBody">—</div>
+  <div class="hint">Cole isto aqui se algo falhar: ele diz o que a GPU suporta e qual foi o último erro.</div>
+</div>
 
 <main>
   <aside>
     <fieldset>
+      <legend>Predefinições</legend>
+      <div class="row wrap">
+        <button class="preset mini" id="presetDefault" data-preset="default">Padrão</button>
+        <button class="preset mini" id="presetChar" data-preset="char2d">Personagem 2D</button>
+        <button class="preset mini" id="presetIso" data-preset="iso">Isométrico</button>
+        <button class="preset mini" id="presetProps" data-preset="props">Itens / props</button>
+      </div>
+      <div class="row"><button id="btnReset" style="flex:1">Reset (voltar ao padrão do site)</button></div>
+    </fieldset>
+
+    <fieldset>
       <legend>Animação</legend>
-      <div class="row"><label for="clipSelect">Clip</label></div>
-      <div class="row"><select id="clipSelect" style="flex:1"><option value="-1">— sem animação —</option></select></div>
-      <div class="row">
+      <div class="row"><label for="clipSelect">Clip</label><select id="clipSelect"><option value="-1">— sem animação —</option></select></div>
+      <div class="row tight">
         <button id="btnPlay">Play</button>
-        <input type="range" id="scrub" min="0" max="1" step="0.0001" value="0" style="flex:1">
+        <input type="range" id="scrub" min="0" max="1" step="0.0001" value="0">
         <span class="val" id="scrubVal">0.00s</span>
       </div>
       <div class="row"><input type="checkbox" id="chkLoopPerfect" checked><label for="chkLoopPerfect">Loop perfeito (descarta o último frame)</label></div>
     </fieldset>
 
     <fieldset>
-      <legend>Spritesheet</legend>
-      <div class="row">
-        <label for="selDirections">Direções</label>
-        <select id="selDirections">
-          <option value="4">4</option>
-          <option value="8" selected>8</option>
-          <option value="16">16</option>
+      <legend>Câmera e enquadramento</legend>
+      <div class="row"><label for="selDirections">Direções</label>
+        <select id="selDirections"><option value="4">4</option><option value="8" selected>8</option><option value="16">16</option></select>
+      </div>
+      <div class="row"><label for="rngElevation">Elevação</label><input type="range" id="rngElevation" min="-10" max="89" step="1" value="18"><span class="val" id="elevationVal">18°</span></div>
+      <div class="row"><label for="rngAzimuth">Frente em</label><input type="range" id="rngAzimuth" min="0" max="359" step="1" value="0"><span class="val" id="azimuthVal">0°</span></div>
+      <div class="row"><label for="selPivot">Pivot</label>
+        <select id="selPivot">
+          <option value="center" selected>centro</option>
+          <option value="base">base (pés)</option>
+          <option value="top">topo</option>
         </select>
       </div>
-      <div class="row">
-        <label for="rngElevation">Elevação</label>
-        <input type="range" id="rngElevation" min="-10" max="89" step="1" value="18">
-        <span class="val" id="elevationVal">18°</span>
-      </div>
-      <div class="row">
-        <label for="rngFrames">Frames</label>
-        <input type="range" id="rngFrames" min="1" max="32" step="1" value="12">
-        <span class="val" id="framesVal">12</span>
-      </div>
-      <div class="row">
-        <label for="rngCell">Célula</label>
-        <input type="range" id="rngCell" min="16" max="512" step="8" value="128">
-        <span class="val" id="cellVal">128 px</span>
-      </div>
+      <div class="row"><label for="rngFrames">Frames</label><input type="range" id="rngFrames" min="1" max="32" step="1" value="12"><span class="val" id="framesVal">12</span></div>
+      <div class="row"><label for="rngCell">Célula</label><input type="range" id="rngCell" min="16" max="512" step="8" value="128"><span class="val" id="cellVal">128 px</span></div>
+      <div class="row"><label for="rngPadding">Padding</label><input type="range" id="rngPadding" min="0" max="8" step="1" value="0"><span class="val" id="paddingVal">0 px</span></div>
       <div class="row"><input type="checkbox" id="chkSsaa"><label for="chkSsaa">SSAA 2x (renderiza 2x e reduz)</label></div>
-      <div class="row">
-        <label for="selBackground">Fundo</label>
+      <div class="row"><input type="checkbox" id="chkLockScale"><label for="chkLockScale">Escala travada (px por unidade)</label></div>
+      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="1" max="64" step="1" value="8"><span class="val" id="scaleLockVal">8</span></div>
+      <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Luz e fundo</legend>
+      <div class="row"><label for="selBackground">Fundo</label>
         <select id="selBackground">
           <option value="transparent" selected>transparente</option>
           <option value="white">branco</option>
           <option value="dark">escuro</option>
         </select>
       </div>
-      <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
       <div class="row"><input type="checkbox" id="chkShadow" checked><label for="chkShadow">Sombra no chão</label></div>
+      <div class="row"><input type="checkbox" id="chkLightCamera"><label for="chkLightCamera">Luz presa à câmera (flat)</label></div>
+      <div class="row"><label for="rngLightAz">Luz (azim.)</label><input type="range" id="rngLightAz" min="0" max="359" step="1" value="34"><span class="val" id="lightAzVal">34°</span></div>
+      <div class="row"><label for="rngLightInt">Luz (int.)</label><input type="range" id="rngLightInt" min="0" max="50" step="1" value="26"><span class="val" id="lightIntVal">2.6</span></div>
     </fieldset>
 
     <fieldset>
       <legend>Gerar</legend>
       <div class="row"><button id="btnGenerate" class="primary" style="flex:1" disabled>Gerar spritesheet</button></div>
+      <div class="row"><button id="btnCancel" class="danger" style="flex:1" disabled>Cancelar</button></div>
       <div class="hint">linhas = direções · colunas = frames</div>
     </fieldset>
   </aside>
 
   <section class="stage">
-    <div id="viewportWrap">
-      <canvas id="viewport"></canvas>
-      <div class="badge" id="viewBadge">arraste um .glb aqui</div>
-      <div id="dropHint">Solte o modelo (.glb, .gltf, .obj, .fbx, .stl, .ply)<br><span class="hint">.gltf com .bin/texturas: arraste todos juntos</span></div>
-      <div id="loadError"></div>
+    <nav class="tabs">
+      <button id="tab3d" aria-selected="true">Viewport 3D</button>
+      <button id="tabResults" aria-selected="false">Sheet &amp; Player</button>
+      <div class="spacer"></div>
+      <div id="progressWrap">
+        <div id="progressTrack"><div id="progressBar"></div></div>
+        <div id="progressLabel">—</div>
+      </div>
+    </nav>
+
+    <div class="pane on" id="viewPane">
+      <div id="viewportWrap">
+        <canvas id="viewport"></canvas>
+        <div class="badge" id="viewBadge">arraste um modelo aqui</div>
+        <div id="dropHint">Solte o modelo (.glb, .gltf, .obj, .fbx, .stl, .ply)<br><span class="hint">.gltf com .bin/texturas: arraste todos juntos</span></div>
+        <div id="loadError"></div>
+      </div>
     </div>
 
-    <div id="progressWrap">
-      <div id="progressTrack"><div id="progressBar"></div></div>
-      <div id="progressLabel">—</div>
-    </div>
-
-    <div id="results">
+    <div class="pane" id="resultPane">
       <fieldset>
         <legend>Sheet</legend>
         <div class="sheetBox">
@@ -206,10 +279,13 @@
             <div class="canvasFrame"><canvas id="sheetPreview" class="out"></canvas></div>
             <div class="row wrap">
               <input type="checkbox" id="chkGrid"><label for="chkGrid">grade</label>
-              <span class="hint" id="sheetInfo"></span>
+              <span class="hint" id="sheetInfo">gere uma sheet para ver aqui</span>
             </div>
           </div>
-          <div style="flex:1; min-width:220px">
+          <div style="flex:1; min-width:240px">
+            <div class="row wrap">
+              <button id="dlZip" class="primary">Baixar tudo (.zip)</button>
+            </div>
             <div class="row wrap">
               <button id="dlSheet">sheet.png</button>
               <button id="dlJson">metadata.json</button>
@@ -223,22 +299,32 @@
       <fieldset>
         <legend>Player</legend>
         <div class="sheetBox">
-          <div class="canvasFrame"><canvas id="playerCanvas" class="out"></canvas></div>
-          <div style="flex:1; min-width:220px">
+          <div class="canvasFrame" id="playerFrame"><canvas id="playerCanvas" class="out"></canvas></div>
+          <div style="flex:1; min-width:240px">
             <div class="row wrap">
               <button id="btnPlayerPlay">Pause</button>
               <label for="playerDir">direção</label>
-              <select id="playerDir"></select>
+              <select id="playerDir" style="flex:0 1 auto"></select>
             </div>
-            <div class="row"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><span class="val" id="fpsVal">12</span></div>
-            <div class="row"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="2"><span class="val" id="zoomVal">2x</span></div>
+            <div class="row tight"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><span class="val" id="fpsVal">12</span></div>
+            <div class="row tight"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="1"><span class="val" id="zoomVal">1x</span></div>
+            <div class="hint">zoom = lupa dentro da caixa fixa (não muda o layout)</div>
           </div>
         </div>
       </fieldset>
 
       <fieldset>
         <legend>GIF por direção</legend>
-        <div class="row wrap"><button id="btnGif">Gerar GIFs</button><span class="hint">fundo transparente via índice 0 (magenta)</span></div>
+        <div class="row wrap">
+          <button id="btnGif">Gerar GIFs</button>
+          <label for="rngGifScale">escala</label>
+          <select id="rngGifScale" style="flex:0 1 auto">
+            <option value="1" selected>100%</option>
+            <option value="0.5">50%</option>
+            <option value="0.25">25%</option>
+          </select>
+          <span class="hint">transparência por índice 0 (magenta)</span>
+        </div>
         <div id="gifList" class="row wrap"></div>
       </fieldset>
     </div>
