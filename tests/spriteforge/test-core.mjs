@@ -124,6 +124,25 @@ const fitHigh = core.measureFit(foxPoses, applyPose, { elevationDeg: 89 });
 ok(Number.isFinite(fitHigh.half) && fitHigh.half > 0, `auto-fit funciona a 89 graus (half ${fitHigh.half.toFixed(4)})`);
 ok(core.measureFit([core.buildPoses({ directionCount: 1, frameCount: 1, times: [0], model: new THREE.Object3D() })[0]], () => {}, { elevationDeg: 0 }) === null, 'modelo vazio devolve null');
 
+/* ---------------- amostra estática (sem animação) ---------------- */
+const objText = await readFile(new URL('../../spriteforge/app/samples/crate.obj', import.meta.url), 'utf8');
+const { OBJLoader } = await import('../../spriteforge/app/vendor/OBJLoader.js');
+const crate = new OBJLoader().parse(objText);
+ok(core.formatOf('crate.obj') === 'obj' && !core.supportsAnimation('crate.obj'), 'crate.obj: OBJ sem animação');
+const cratePrep = core.prepareLoaded(crate, { doubleSide: true });
+ok(cratePrep.computedNormals === 0, 'as normais do OBJ já vêm no arquivo (nada recalculado)');
+let crateTris = 0;
+crate.traverse((o) => { if (o.isMesh) crateTris += (o.geometry.index ? o.geometry.index.count : o.geometry.getAttribute('position').count) / 3; });
+ok(crateTris === 12, `caixote tem 12 triângulos (${crateTris})`);
+const crateBox = new THREE.Box3().setFromObject(crate, true);
+approx(crateBox.max.y - crateBox.min.y, 1, 1e-6, 'caixote tem 1 unidade de altura');
+approx(crateBox.min.y, 0, 1e-6, 'caixote apoiado em y=0 (pivot base faz sentido)');
+const cratePoses = core.buildPoses({ directionCount: 4, frameCount: 1, times: [0], model: crate });
+ok(cratePoses.length === 4, 'sem animação: 1 frame por direção (4 poses)');
+const crateFit = core.measureFit(cratePoses, (p) => { crate.rotation.y = p.modelAzimuth; crate.updateMatrixWorld(true); }, { elevationDeg: 0 });
+approx(crateFit.half, 0.5 / core.SCALE_FIX, 1e-6, 'half do caixote = 0.5 / 0.86');
+ok(crateFit.samples === 4, 'mede as 4 direções');
+
 /* ---------------- pivot / enquadramento ---------------- */
 const fCenter = core.frameForPivot(fit.bounds, 'center');
 const fBase = core.frameForPivot(fit.bounds, 'base');
@@ -168,6 +187,19 @@ ok(wBase.cy > wMid.cy && wTop.cy < wMid.cy, 'base sobe o alvo, topo desce');
 ok(wBase.cy > 0 && wTop.cy < 0, `alvo deslocado na direção certa (base ${wBase.cy.toFixed(3)}, topo ${wTop.cy.toFixed(3)})`);
 approx(core.PIVOT_MARGIN, (1 - core.SCALE_FIX) / 2, 1e-12, 'PIVOT_MARGIN derivado do SCALE_FIX');
 approx(core.pivotPoint('base').y, (1 + core.SCALE_FIX) / 2, 1e-12, 'pivot do metadata bate com o pixel da borda útil');
+// O pivot é aplicado uma vez e a câmera é reposicionada por pose, então o
+// resultado não pode depender do azimute. A elevação 0 torna isso mensurável:
+// girar em torno de Y não muda as coordenadas Y do modelo, então o centro
+// projetado tem de ser exatamente o mesmo em qualquer direção.
+const yRef = ndcY(framed(fBase).camera, boxFox);
+for (const az of [Math.PI / 2, Math.PI, -Math.PI / 3, 2.4]) {
+  const cam = core.createFramedCamera({ half: fBase.half, center: fit.center, cx: fBase.cx, cy: fBase.cy, elevationDeg: 0, azimuthRad: az, distance: fBase.half * 6 + 1 });
+  const y = ndcY(cam.camera, boxFox);
+  approx((y.lo + y.hi) / 2, (yRef.lo + yRef.hi) / 2, 1e-6, `pivot idêntico no azimute ${az.toFixed(2)} (turntable)`);
+}
+const plain = core.createOrthoCamera({ half: fBase.half, center: fit.center, elevationDeg: 0, azimuthRad: 0, distance: fBase.half * 6 + 1 });
+core.applyPivotOffset(plain, { cx: fBase.cx, cy: fBase.cy, half: fBase.half });
+ok(plain.left === fBase.cx - fBase.half && plain.top === fBase.cy + fBase.half, 'applyPivotOffset desloca o frustum');
 const cam89 = core.createFramedCamera({ half: fBase.half, center: fit.center, cx: fBase.cx, cy: fBase.cy, elevationDeg: 89, azimuthRad: 0.3, distance: fBase.half * 6 + 1 });
 ok(Number.isFinite(cam89.camera.position.y) && cam89.target.length() > 0, 'pivot funciona a 89 graus (sem NaN)');
 
