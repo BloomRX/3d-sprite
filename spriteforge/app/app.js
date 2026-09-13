@@ -17,6 +17,7 @@ import * as core from './core.js';
 const $ = (id) => document.getElementById(id);
 const el = {
   fileInput: $('fileInput'), btnOpen: $('btnOpen'), btnSample: $('btnSample'), modelInfo: $('modelInfo'),
+  btnSampleStatic: $('btnSampleStatic'),
   btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
   tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
@@ -471,14 +472,19 @@ async function loadFiles(fileList) {
   }
 }
 
-async function loadSample() {
+/**
+ * Carrega uma amostra de samples/. Duas de propósito: o Fox tem animação
+ * (exercita clipes e o loop perfeito) e o crate.obj não tem (exercita o caminho
+ * de 1 frame por direção, sem depender de o usuário ter um arquivo estático).
+ */
+async function loadSample(filename = 'fox.glb') {
   try {
     hideError();
-    setStatus('carregando samples/fox.glb…');
-    const res = await fetch('./samples/fox.glb');
+    setStatus(`carregando samples/${filename}…`);
+    const res = await fetch(`./samples/${filename}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { root, animations } = await parseModel({ name: 'fox.glb' }, await res.arrayBuffer(), new Map());
-    applyModel(root, animations, 'fox.glb');
+    const { root, animations } = await parseModel({ name: filename }, await res.arrayBuffer(), new Map());
+    applyModel(root, animations, filename);
   } catch (err) {
     console.error(err);
     showError(`Não consegui carregar o exemplo: ${err.message}`);
@@ -633,7 +639,8 @@ el.btnReset.addEventListener('click', () => {
 
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
 el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
-el.btnSample.addEventListener('click', loadSample);
+el.btnSample.addEventListener('click', () => loadSample('fox.glb'));
+el.btnSampleStatic.addEventListener('click', () => loadSample('crate.obj'));
 
 el.clipSelect.addEventListener('change', () => selectClip(Number(el.clipSelect.value)));
 el.btnPlay.addEventListener('click', () => {
