@@ -46,14 +46,37 @@ export const PRESETS = {
   default: {},
   // Personagem de plataforma: câmera na altura do chão, pé ancorado embaixo.
   char2d: { elevation: 0, pivot: 'base', cell: 128, shadow: true, lightCamera: false },
-  // Isométrico: 30° (dimétrico) e escala travada para vários objetos combinarem.
-  iso: { elevation: 30, pivot: 'center', cell: 128, lockScale: true, pxPerUnit: 8, shadow: true },
+  // Isométrico: 30° (dimétrico; isométrico verdadeiro seria 35,264°). A escala
+  // travada fica DESLIGADA de propósito: ela é absoluta (px por unidade de mundo)
+  // e modelos variam de tamanho demais — o Fox tem 79 unidades, um personagem de
+  // jogo costuma ter 1. Quem quiser combinar vários objetos liga a trava na mão,
+  // e o controle se calibra sozinho no modelo atual ao ser ligado.
+  iso: { elevation: 30, pivot: 'center', cell: 128, lockScale: false, shadow: true },
   // Itens/ícones: 4 direções, célula pequena, luz frontal sem sombra.
   props: { directions: 4, elevation: 0, pivot: 'center', cell: 64, shadow: false, lightCamera: true }
 };
 
 export function presetSettings(name) {
   return { ...DEFAULT_SETTINGS, ...(PRESETS[name] || {}) };
+}
+
+/**
+ * Escala travada: quantas unidades de mundo cabem em meia célula.
+ * É o `half` da câmera — numa ortográfica é SÓ isso que define o enquadramento
+ * (a distância da câmera não muda o tamanho projetado, só o near/far).
+ */
+export function lockedHalf(cell, pxPerUnit) {
+  const ppu = Number(pxPerUnit) > 0 ? Number(pxPerUnit) : 1;
+  return Math.max(1e-6, cell / (2 * ppu));
+}
+
+/**
+ * px/unidade que faz um modelo de `half` conhecido caber exatamente na célula.
+ * É como o controle de escala travada se calibra ao ser ligado: parte do tamanho
+ * real do modelo em vez de um chute que corta tudo.
+ */
+export function pxPerUnitToFit(cell, half) {
+  return half > 0 ? cell / (2 * half) : 1;
 }
 
 /** Pivot normalizado (0..1) dentro da célula, no formato que as engines usam. */

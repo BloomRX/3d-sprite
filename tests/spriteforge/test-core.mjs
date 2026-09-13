@@ -341,7 +341,9 @@ ok(root.children.length === 2, 'disposeHierarchy não desmonta a cena (app.js fa
 ok(core.DEFAULT_SETTINGS.directions === 8 && core.DEFAULT_SETTINGS.cell === 128 && core.DEFAULT_SETTINGS.elevation === 18, 'defaults do site');
 ok(core.DEFAULT_SETTINGS.padding === 0 && core.DEFAULT_SETTINGS.lockScale === false, 'padding zero e escala livre por padrão');
 ok(core.presetSettings('char2d').pivot === 'base' && core.presetSettings('char2d').elevation === 0, 'preset personagem: pivot base, câmera no horizonte');
-ok(core.presetSettings('iso').elevation === 30 && core.presetSettings('iso').lockScale === true, 'preset isométrico: 30 graus e escala travada');
+ok(core.presetSettings('iso').elevation === 30 && core.presetSettings('iso').pivot === 'center', 'preset isométrico: 30 graus, pivot centro');
+ok(core.presetSettings('iso').lockScale === false, 'preset isométrico NÃO trava a escala (trava absoluta cortava modelos grandes)');
+ok(core.DEFAULT_SETTINGS.lockScale === false && core.presetSettings('char2d').lockScale === false, 'nenhum preset trava a escala por padrão');
 ok(core.presetSettings('props').directions === 4 && core.presetSettings('props').lightCamera === true, 'preset props: 4 direções, luz na câmera');
 ok(core.presetSettings('props').cell === 64, 'preset props usa célula menor');
 ok(core.presetSettings('default').cell === core.DEFAULT_SETTINGS.cell, 'preset default == defaults');
@@ -349,6 +351,21 @@ ok(core.presetSettings('inexistente').directions === core.DEFAULT_SETTINGS.direc
 const mut = core.presetSettings('iso'); mut.cell = 999;
 ok(core.presetSettings('iso').cell === 128, 'presetSettings devolve cópia (mutar não vaza)');
 ok(Object.keys(core.PRESETS).length === 4, '4 presets: default, char2d, iso, props');
+
+/* ---------------- escala travada ---------------- */
+approx(core.lockedHalf(128, 8), 8, 1e-12, 'trava a 8 px/un: half 8 (janela de 16 unidades)');
+approx(core.lockedHalf(128, 0.564), 113.475, 1e-3, 'trava a 0.564 px/un: half ~113.5 (cabe o Fox)');
+approx(core.pxPerUnitToFit(128, 113.49), 0.564, 1e-3, 'px/un que faz half 113.49 caber em 128px');
+approx(core.pxPerUnitToFit(128, 64), 1, 1e-12, 'half 64 em célula 128 = 1 px/un');
+for (const half of [8, 64, 113.49, 0.5]) {
+  approx(core.lockedHalf(128, core.pxPerUnitToFit(128, half)), half, 1e-9, `ida e volta da calibração (half ${half})`);
+}
+approx(core.lockedHalf(128, 0), 64, 1e-12, 'px/un zero não divide por zero (cai em 1)');
+approx(core.lockedHalf(128, -3), 64, 1e-12, 'px/un negativo idem');
+approx(core.pxPerUnitToFit(128, 0), 1, 1e-12, 'half zero devolve 1 px/un em vez de Infinity');
+// O número do bug reportado: 8 px/un sobre o Fox cobria 7% do modelo.
+ok(core.lockedHalf(128, 8) / 113.49 < 0.08, 'a trava antiga do preset iso cobria <8% do Fox (o bug relatado)');
+ok(core.pxPerUnitToFit(128, 113.49) < 1, 'o Fox precisa de menos de 1 px/un — por isso o slider ia de 1 a 64 e não servia');
 
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

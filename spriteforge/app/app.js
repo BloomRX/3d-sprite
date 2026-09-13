@@ -550,7 +550,7 @@ function applySettings(s) {
   el.chkSsaa.checked = !!s.ssaa;
   el.chkLockScale.checked = !!s.lockScale;
   el.rngScaleLock.value = String(s.pxPerUnit);
-  el.scaleLockVal.textContent = `${s.pxPerUnit} px/un`;
+  el.scaleLockVal.textContent = `${Number(s.pxPerUnit).toFixed(2)} px/un`;
   el.rowScaleLock.hidden = !s.lockScale;
   el.chkTurntable.checked = !!s.turntable;
   el.selBackground.value = s.background;
@@ -659,8 +659,13 @@ el.chkShadow.addEventListener('change', () => { ground.visible = el.chkShadow.ch
 el.rngElevation.addEventListener('input', () => { el.elevationVal.textContent = `${el.rngElevation.value}°`; framePreview(); });
 el.rngAzimuth.addEventListener('input', () => { el.azimuthVal.textContent = `${el.rngAzimuth.value}°`; });
 el.rngPadding.addEventListener('input', () => { el.paddingVal.textContent = `${el.rngPadding.value} px`; });
-el.chkLockScale.addEventListener('change', () => { el.rowScaleLock.hidden = !el.chkLockScale.checked; });
-el.rngScaleLock.addEventListener('input', () => { el.scaleLockVal.textContent = `${el.rngScaleLock.value} px/un`; });
+el.chkLockScale.addEventListener('change', () => {
+  el.rowScaleLock.hidden = !el.chkLockScale.checked;
+  if (!el.chkLockScale.checked) return;
+  const ppu = calibrateScaleLock();
+  if (ppu) setStatus(`escala travada em ${ppu.toFixed(2)} px/unidade (calibrada neste modelo) — mude para combinar com outros projetos`, 'ok');
+});
+el.rngScaleLock.addEventListener('input', () => { el.scaleLockVal.textContent = `${Number(el.rngScaleLock.value).toFixed(2)} px/un`; });
 el.rngLightAz.addEventListener('input', () => { el.lightAzVal.textContent = `${el.rngLightAz.value}°`; applyLightRig(); });
 el.rngLightInt.addEventListener('input', () => { el.lightIntVal.textContent = ((Number(el.rngLightInt.value) || 0) / 10).toFixed(1); applyLightRig(); });
 el.chkLightCamera.addEventListener('change', applyLightRig);
@@ -701,6 +706,53 @@ el.btnCopyDiag.addEventListener('click', async () => {
     setStatus(foi ? 'diagnóstico copiado' : 'não consegui copiar — selecione o texto do painel', foi ? 'ok' : 'err');
   }
 });
+
+/**
+ * Mede o `half` do modelo com os ajustes atuais. É síncrono (measureFit não
+ * renderiza) e devolve o modelo como estava — serve para calibrar a escala
+ * travada sem precisar gerar a sheet antes.
+ */
+function measureHalfNow() {
+  if (!state.model) return null;
+  const clip = state.clips[state.clipIndex] || null;
+  const times = core.frameTimes(clip ? clip.duration : 0, clip ? Number(el.rngFrames.value) : 1, el.chkLoopPerfect.checked);
+  const poses = core.buildPoses({
+    directionCount: Number(el.selDirections.value), frameCount: times.length, times,
+    model: state.model, turntable: el.chkTurntable.checked,
+    azimuthOffsetDeg: Number(el.rngAzimuth.value) || 0
+  });
+  const applyPose = (p) => {
+    state.model.rotation.y = p.modelAzimuth;
+    if (state.mixer && clip) state.mixer.setTime(p.time);
+    state.model.updateMatrixWorld(true);
+  };
+  const prevRotation = state.model.rotation.y;
+  const prevTime = state.mixer ? state.mixer.time : 0;
+  const fit = core.measureFit(core.fitPoses(poses, { maxFrames: 4, maxDirections: 4 }), applyPose, {
+    elevationDeg: Number(el.rngElevation.value)
+  });
+  state.model.rotation.y = prevRotation;
+  if (state.mixer && clip) state.mixer.setTime(prevTime);
+  state.model.updateMatrixWorld(true);
+  return fit ? fit.half : null;
+}
+
+/**
+ * Calibra a escala travada no modelo atual: o valor que faz ele caber inteiro na
+ * célula. Sem isso o usuário parte de um chute (8 px/un serve para modelos de
+ * ~16 unidades; o Fox tem 79) e recebe um recorte do meio do personagem.
+ */
+function calibrateScaleLock() {
+  const half = measureHalfNow();
+  if (!half) { setStatus('carregue um modelo para calibrar a escala travada', 'err'); return null; }
+  const ppu = core.pxPerUnitToFit(Number(el.rngCell.value), half);
+  const snapped = Math.min(64, Math.max(0.05, Math.round(ppu * 20) / 20));
+  el.rngScaleLock.value = String(snapped);
+  el.scaleLockVal.textContent = `${snapped.toFixed(2)} px/un`;
+  markPreset(null);
+  saveSettings(null);
+  return snapped;
+}
 
 /* ---- cancelar geração ---- */
 el.btnCancel.addEventListener('click', () => {
@@ -818,12 +870,19 @@ async function generate() {
     // saiam do mesmo tamanho. Se o modelo não couber, avisa em vez de cortar mudo.
     let half = frame.half;
     if (lockScale) {
-      half = layout.cell / (2 * pxPerUnit);
-      if (frame.half > half) {
+      const travado = core.lockedHalf(layout.cell, pxPerUnit);
+      if (travado < frame.half) {
+        // A trava nunca entrega um sprite cortado: se o valor pedido não cabe,
+        // usa o menor que cabe e diz qual é. Cortar em silêncio foi o bug do
+        // preset isométrico (8 px/un sobre o Fox = 7% do modelo na janela).
+        const minimo = core.pxPerUnitToFit(layout.cell, frame.half);
         warnings.push(
-          `escala travada em ${pxPerUnit} px/unidade corta o modelo: ele precisaria de half ${frame.half.toFixed(2)} e coube ${half.toFixed(2)}. ` +
-          'Diminua px/unidade, aumente a célula ou desligue a trava.'
+          `escala travada em ${pxPerUnit} px/unidade não cabe neste modelo (precisaria de half ${frame.half.toFixed(2)}, a trava dava ${travado.toFixed(2)}): ` +
+          `usei ${minimo.toFixed(3)} px/unidade, que é o mínimo para caber inteiro.`
         );
+        half = frame.half;
+      } else {
+        half = travado;
       }
     }
 

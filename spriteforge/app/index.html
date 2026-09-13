@@ -225,7 +225,8 @@
       <div class="row"><label for="rngPadding">Padding</label><input type="range" id="rngPadding" min="0" max="8" step="1" value="0"><span class="val" id="paddingVal">0 px</span></div>
       <div class="row"><input type="checkbox" id="chkSsaa"><label for="chkSsaa">SSAA 2x (renderiza 2x e reduz)</label></div>
       <div class="row"><input type="checkbox" id="chkLockScale"><label for="chkLockScale">Escala travada (px por unidade)</label></div>
-      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="1" max="64" step="1" value="8"><span class="val" id="scaleLockVal">8</span></div>
+      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="0.05" max="64" step="0.05" value="8"><span class="val" id="scaleLockVal">8.00</span></div>
+      <div class="row"><span class="hint">Trava absoluta: o mesmo modelo sai do mesmo tamanho em qualquer projeto. Ao ligar, o valor é calibrado no modelo atual para não cortar nada.</span></div>
       <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
     </fieldset>
 

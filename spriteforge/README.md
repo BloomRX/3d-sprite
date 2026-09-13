@@ -102,7 +102,7 @@ cola tudo para colar num relato de bug.
 | Célula | 16–512 px | lado de cada sprite (a sheet é clampada em 8192 px) |
 | **Padding** | 0–8 px | vão entre as células (contra *bleeding* em atlas mipmapeado) |
 | SSAA 2x | on/off | renderiza em 2× e reduz no `drawImage`. **Desliga sozinho** se `célula×2` passar do `maxTextureSize` da GPU |
-| **Escala travada** | 1–64 px/unidade | modelos diferentes saem do mesmo tamanho. Se o modelo não couber, o app **avisa** em vez de cortar |
+| **Escala travada** | 0,05–64 px/un | modelos diferentes saem do mesmo tamanho. Ao ligar, o valor se **calibra no modelo atual**; se ainda assim não couber, o app usa o mínimo que cabe e avisa — **nunca corta** |
 | Fundo | transparente / branco / escuro | fundo da sheet |
 | Turntable | on/off | gira a **câmera** em vez do **modelo** |
 | Sombra | on/off | plano com `ShadowMaterial` (aparece sobre fundo transparente) |
@@ -240,9 +240,18 @@ func _ready() -> void:
     quadrada, quando é a **altura** que limita o `half` (caso do Fox e do caixote),
     `base` coincide com `centro` — não há para onde descer sem cortar o topo. A
     diferença aparece em modelos mais largos que altos.
-18. **Escala travada avisa em vez de cortar.** Com `px/unidade` o `half` deixa de vir da
-    medição (`célula / (2 × px/un)`); se o modelo não couber, o status explica o que
-    fazer em vez de entregar um sprite decepado.
+18. **Escala travada se calibra e nunca corta.** Com `px/unidade` o `half` deixa de vir
+    da medição (`célula / (2 × px/un)`) — e aí está a armadilha: é um valor **absoluto**,
+    e o tamanho dos modelos varia muito. O preset isométrico nascia com a trava ligada em
+    8 px/un, o que só serve para modelos de ~16 unidades; sobre o Fox (79 unidades) a
+    janela da câmera cobria **7 %** do personagem, e o pior vértice caía em NDC 12,2 —
+    1220 % além da borda. Agora: (a) nenhum preset liga a trava; (b) ao ligar, o valor é
+    calculado do modelo carregado (`pxPerUnitToFit`); (c) se o valor pedido não couber, o
+    app usa o mínimo que cabe e diz qual é, em vez de entregar um sprite decepado. O
+    slider foi de `1–64` para `0,05–64` porque o Fox precisa de **0,564 px/un** — o
+    intervalo antigo nem expressava um valor correto. Vale notar que a distância da
+    câmera não tem nada com isso: numa orthographic quem define o tamanho projetado é só
+    o `half` do frustum.
 19. **SSAA é limitado pela GPU.** `célula × 2` acima de `maxTextureSize` desliga o SSAA e
     avisa — acima disso o render falha em silêncio ou derruba o contexto.
 20. **`WebGLRenderer` protegido nos dois lugares**, com `webglcontextlost` e um painel de
