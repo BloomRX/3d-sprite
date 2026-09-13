@@ -1,0 +1,42 @@
+name: CI
+
+# Roda em qualquer push/PR. Não instala o app (ele não tem build): instala só as
+# ferramentas de verificação. Os testes de spriteforge não dependem de npm —
+# importam o three que já está vendido em spriteforge/app/vendor.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verifica:
+    name: Valida, lint e testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validação leve do DevKit (sintaxe de tudo que é texto)
+        run: python3 tools/project_cli.py validate
+
+      - name: Lint do app (ESLint, regras de erro real)
+        run: |
+          npm install --no-save --no-audit --no-fund eslint@9 globals@15
+          npx eslint --no-config-lookup -c tests/spriteforge/eslint.config.mjs \
+            spriteforge/app/app.js spriteforge/app/core.js
+
+      - name: Testes do DevKit (ferramenta em si)
+        run: |
+          python3 tools/test_project_cli.py
+          python3 tools/test_creation.py
+
+      - name: Testes do SpriteForge (core.js contra o three vendido)
+        run: node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core.mjs
