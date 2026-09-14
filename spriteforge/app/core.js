@@ -34,10 +34,37 @@ export const GIF_ALPHA_CUT = 128;
  * Separada do encodeGif porque é a decisão que define se a sombra e a serrilha
  * somem ou viram mancha — e assim dá para testá-la sem decodificar GIF.
  */
-export function alphaMask(rgba, alphaCut = GIF_ALPHA_CUT) {
+export const BAYER4 = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5]
+];
+
+/**
+ * @param {Uint8ClampedArray} rgba
+ * @param {number} alphaCut   alpha >= isso fica opaco
+ * @param {{dither?:boolean,width?:number}} opts
+ *   `dither` trata a faixa 0 < alpha < alphaCut com uma matriz de Bayer 4x4 em
+ *   vez de descartá-la: é assim que se finge transparência parcial num formato
+ *   de 1 bit. É o que permite ter sombra num GIF transparente — ela sai
+ *   pontilhada, com a densidade certa (35% de alpha ≈ 35% dos pontos).
+ * @returns {Uint8Array} 1 = pixel vira o índice transparente
+ */
+export function alphaMask(rgba, alphaCut = GIF_ALPHA_CUT, { dither = false, width = 0 } = {}) {
   const count = rgba.length >> 2;
   const mask = new Uint8Array(count);
-  for (let p = 0; p < count; p++) mask[p] = rgba[p * 4 + 3] < alphaCut ? 1 : 0;
+  const w = width > 0 ? width : Math.max(1, Math.round(Math.sqrt(count)));
+  for (let p = 0; p < count; p++) {
+    const a = rgba[p * 4 + 3];
+    if (a >= alphaCut) { mask[p] = 0; continue; }   // opaco de verdade
+    if (a <= 0) { mask[p] = 1; continue; }          // vazio de verdade
+    if (!dither) { mask[p] = 1; continue; }         // corte seco: some
+    const x = p % w;
+    const y = (p / w) | 0;
+    const limiar = ((BAYER4[y & 3][x & 3] + 0.5) / 16) * 255;
+    mask[p] = a > limiar ? 0 : 1;
+  }
   return mask;
 }
 /**
@@ -57,7 +84,8 @@ export const DEFAULT_SETTINGS = {
   cell: 128, padding: 0, ssaa: false, lockScale: false, pxPerUnit: 8,
   turntable: false, background: 'transparent', shadow: true,
   lightCamera: false, lightAz: 34, lightIntensity: 2.6,
-  loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'transparent'
+  loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'dither',
+  shadowLayer: true, playerShadow: true
 };
 
 /**
@@ -431,7 +459,8 @@ export function buildMetadata({
   azimuthOffsetDeg = 0,
   pivot = 'center',
   lockScale = false,
-  pxPerUnit = null
+  pxPerUnit = null,
+  shadow = null
 }) {
   const cell = layout.cell;
   const perFrameMs = Math.round(1000 / fps);
@@ -479,6 +508,9 @@ export function buildMetadata({
     // em px por unidade de mundo, então dá para misturá-los na mesma cena.
     scale: { locked: !!lockScale, px_per_unit: lockScale ? pxPerUnit : null },
     render: { engine: 'webgl', ssaa: !!ssaa, turntable: !!turntable, background },
+    // Camada de sombra separada: mesma grade, para o jogo ligar/desligar.
+    // null quando a opção estava desligada.
+    shadow,
     frames
   };
 }
@@ -558,12 +590,12 @@ export function buildAsepriteJson(meta) {
  *
  * @param {Array<Uint8ClampedArray>} frames RGBA, comprimento w*h*4
  */
-export function encodeGif({ width, height, frames, delays = [], repeat = 0, alphaCut = GIF_ALPHA_CUT, transparent = true }) {
+export function encodeGif({ width, height, frames, delays = [], repeat = 0, alphaCut = GIF_ALPHA_CUT, transparent = true, dither = false }) {
   const gif = GIFEncoder();
   const count = width * height;
   frames.forEach((rgba, i) => {
     const data = new Uint8ClampedArray(rgba);
-    const mask = alphaMask(rgba, alphaCut);
+    const mask = alphaMask(rgba, alphaCut, { dither, width });
     let palette;
     if (transparent) {
       for (let p = 0; p < count; p++) {

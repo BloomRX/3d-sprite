@@ -229,7 +229,7 @@ const meta = core.buildMetadata({
   fps: 12, loop: true, ssaa: false, turntable: false, background: 'transparent',
   azimuthOffsetDeg: 0, pivot: 'base'
 });
-ok(JSON.stringify(Object.keys(meta)) === JSON.stringify(['tool', 'image', 'size', 'cell', 'grid', 'pivot', 'directions', 'animation', 'scale', 'render', 'frames']), 'chaves do metadata na ordem do schema');
+ok(JSON.stringify(Object.keys(meta)) === JSON.stringify(['tool', 'image', 'size', 'cell', 'grid', 'pivot', 'directions', 'animation', 'scale', 'render', 'shadow', 'frames']), 'chaves do metadata na ordem do schema');
 ok(meta.image === 'fox_sheet.png', 'nome da sheet derivado do modelo');
 ok(meta.size.w === 1536 && meta.size.h === 1024, 'bloco size');
 ok(meta.cell.w === 128 && meta.cell.h === 128 && meta.cell.padding === 0, 'bloco cell com padding');
@@ -246,6 +246,14 @@ ok(meta.frames.dir01_001.frame.y === 128 && meta.frames.dir01_001.frame.x === 0,
 ok(meta.frames.dir07_012.frame.x === 1408 && meta.frames.dir07_012.frame.y === 896, 'último frame no canto');
 ok(meta.frames.dir00_001.duration === 83, 'duração por frame em ms (1000/12)');
 ok(meta.frames.dir00_001.trimmed === false && meta.frames.dir00_001.rotated === false, 'trimmed/rotated falsos');
+ok(meta.shadow === null, 'sem a opção ligada, shadow vem null');
+const metaSombra = core.buildMetadata({
+  baseName: 'fox', layout, directionCount: 8, elevationDeg: 18, times: [0],
+  shadow: { file: 'fox_Walk_shadow.png', layout: 'row-per-direction' }
+});
+ok(metaSombra.shadow.file === 'fox_Walk_shadow.png', 'camada de sombra registrada no metadata');
+ok(metaSombra.shadow.layout === 'row-per-direction', 'a camada usa a mesma grade da sheet');
+ok(Object.keys(metaSombra).indexOf('shadow') < Object.keys(metaSombra).indexOf('frames'), 'shadow vem antes de frames no schema');
 
 const metaLock = core.buildMetadata({ baseName: 'a', layout, directionCount: 8, elevationDeg: 0, times: [0], lockScale: true, pxPerUnit: 8 });
 ok(metaLock.scale.locked === true && metaLock.scale.px_per_unit === 8, 'escala travada registrada');
@@ -317,6 +325,33 @@ ok(core.alphaMask(px(127))[0] === 1 && core.alphaMask(px(128))[0] === 0, 'o limi
 ok(core.alphaMask(px(0))[0] === 1 && core.alphaMask(px(255))[0] === 0, 'vazio some, opaco fica');
 const borda = core.alphaMask(new Uint8ClampedArray([200, 120, 60, 90]));
 ok(borda[0] === 1, 'pixel de borda com alpha parcial não vira mais halo opaco');
+
+/* ---- pontilhado de Bayer: sombra num GIF transparente ---- */
+const DW = 16, DH = 16;
+const sombraCheia = new Uint8ClampedArray(DW * DH * 4);
+for (let i = 0; i < DW * DH; i++) sombraCheia.set([0, 0, 0, 89], i * 4);
+const soma = (a) => a.reduce((x, y) => x + y, 0);
+const semDither = core.alphaMask(sombraCheia, 128, { width: DW });
+const comDither = core.alphaMask(sombraCheia, 128, { dither: true, width: DW });
+ok(soma(semDither) === DW * DH, 'sem dither a sombra a 35% some inteira');
+const opacosDither = DW * DH - soma(comDither);
+ok(opacosDither === 96, `com dither, 96 de 256 pontos ficam (6/16 = 37,5%, o mais perto de 35%) — obtidos ${opacosDither}`);
+ok(opacosDither / (DW * DH) > 0.3 && opacosDither / (DW * DH) < 0.45, 'a densidade do pontilhado acompanha o alpha');
+const vazioDither = core.alphaMask(new Uint8ClampedArray(DW * DH * 4), 128, { dither: true, width: DW });
+ok(soma(vazioDither) === DW * DH, 'vazio continua 100% transparente mesmo com dither');
+const opacoDither = new Uint8ClampedArray(DW * DH * 4);
+for (let i = 0; i < DW * DH; i++) opacoDither.set([9, 9, 9, 255], i * 4);
+ok(soma(core.alphaMask(opacoDither, 128, { dither: true, width: DW })) === 0, 'opaco continua 100% opaco com dither');
+const meioDither = new Uint8ClampedArray(DW * DH * 4);
+for (let i = 0; i < DW * DH; i++) meioDither.set([0, 0, 0, 128], i * 4);
+ok(soma(core.alphaMask(meioDither, 255, { dither: true, width: DW })) < DW * DH, 'dither também suaviza outros alphas parciais');
+const gifDither = core.encodeGif({ width: CELL, height: CELL, frames, delays: t.map(() => 83), transparent: true, dither: true });
+ok(gifDither[0] === 0x47 && gifDither[gifDither.length - 1] === 0x3b, 'GIF pontilhado é um GIF válido');
+let transDither = 0;
+for (let i = 0; i < gifDither.length - 5; i++) if (gifDither[i] === 0x21 && gifDither[i + 1] === 0xf9 && (gifDither[i + 3] & 0x01)) transDither++;
+ok(transDither === N, `os ${N} quadros do GIF pontilhado continuam transparentes (${transDither})`);
+ok(core.BAYER4.length === 4 && core.BAYER4.every((l) => l.length === 4), 'matriz de Bayer 4x4');
+ok(new Set(core.BAYER4.flat()).size === 16, 'os 16 limiares de Bayer são distintos');
 const sombra = new Uint8ClampedArray(4 * 4);
 for (let i = 0; i < 4; i++) sombra.set([0, 0, 0, 89], i * 4);
 const gifSombra = core.encodeGif({ width: 2, height: 2, frames: [sombra] });
@@ -370,7 +405,8 @@ ok(root.children.length === 2, 'disposeHierarchy não desmonta a cena (app.js fa
 /* ---------------- presets ---------------- */
 ok(core.DEFAULT_SETTINGS.directions === 8 && core.DEFAULT_SETTINGS.cell === 128 && core.DEFAULT_SETTINGS.elevation === 18, 'defaults do site');
 ok(core.DEFAULT_SETTINGS.padding === 0 && core.DEFAULT_SETTINGS.lockScale === false, 'padding zero e escala livre por padrão');
-ok(core.DEFAULT_SETTINGS.gifBg === 'transparent' && core.DEFAULT_SETTINGS.lightIntensity === 2.6, 'GIF transparente e luz 2.6 por padrão');
+ok(core.DEFAULT_SETTINGS.gifBg === 'dither' && core.DEFAULT_SETTINGS.lightIntensity === 2.6, 'GIF pontilhado e luz 2.6 por padrão');
+ok(core.DEFAULT_SETTINGS.shadowLayer === true && core.DEFAULT_SETTINGS.playerShadow === true, 'camada de sombra ligada por padrão');
 ok(core.presetSettings('char2d').pivot === 'base' && core.presetSettings('char2d').elevation === 0, 'preset personagem: pivot base, câmera no horizonte');
 ok(core.presetSettings('iso').elevation === 30 && core.presetSettings('iso').pivot === 'center', 'preset isométrico: 30 graus, pivot centro');
 ok(core.presetSettings('iso').lockScale === false, 'preset isométrico NÃO trava a escala (trava absoluta cortava modelos grandes)');

@@ -111,7 +111,8 @@ cola tudo para colar num relato de bug.
 | Loop perfeito | on/off | descarta o último frame (idêntico ao primeiro) |
 | **Zoom (player)** | 1–6× | lupa **dentro** da caixa fixa de 256 px: não muda o layout |
 | **Escala do GIF** | 100 / 50 / 25 % | reduz antes de quantizar (GIF tem 256 cores por quadro) |
-| **Fundo do GIF** | transparente / branco / escuro | GIF tem alpha de **1 bit**: transparente recorta em 50 % (sem halo, mas a sombra some); com fundo ela é composta de verdade e o GIF fica igual ao preview |
+| **Fundo do GIF** | transparente / **pontilhado** / branco / escuro | GIF tem alpha de **1 bit**. `transparente` recorta em 50 % (sem halo, sem sombra); `pontilhado` usa Bayer 4×4 e mantém a sombra como pontinho (35 % de alpha ≈ 37,5 % de pontos); com fundo a sombra é composta de verdade |
+| **Camada de sombra separada** | on/off | segundo passe de render que gera `<nome>_shadow.png` na mesma grade, só com a sombra — para ligar/desligar no jogo |
 
 Todo slider tem um **campo numérico** do lado: dá para digitar `512` em vez de arrastar.
 O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
@@ -124,6 +125,7 @@ O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 | `<nome>_metadata.json` | schema completo, compatível com o CLI do Blender |
 | `<nome>.aseprite.json` | sidecar Aseprite: `frames` em array + `meta.frameTags` |
 | `<nome>_dirNN.gif` | um GIF animado por direção, com transparência |
+| **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas) |
 | **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
@@ -138,6 +140,25 @@ No Aseprite o pivot vira um `slice` chamado `pivot`, então o anchor abre no lug
 Em **Godot**, o `offset` do `Sprite2D`/`AnimatedSprite2D` que corresponde a esse pivot é
 `(0.5 - pivot.x, 0.5 - pivot.y) * tamanho da célula`; em **Unity**, o pivot em pixels é
 `(pivot.x * cell.w, (1 - pivot.y) * cell.h)`.
+
+### A camada de sombra
+
+`<nome>_shadow.png` tem **a mesma grade** da sheet: célula, linhas e colunas idênticas, e o
+`metadata.json` aponta o arquivo em `shadow.file`. Na engine ela é um segundo sprite
+desenhado **antes** do personagem, com o mesmo frame atual — e basta esconder o nó para a
+sombra sumir:
+
+```gdscript
+# Godot 4 — dois AnimatedSprite2D com os mesmos SpriteFrames
+sombra.play(&"andar")            # mesmo nome de animação
+sombra.frame = personagem.frame
+sombra.visible = mostrar_sombra  # é só isso que liga e desliga
+```
+
+Ela é renderizada num segundo passe com `material.colorWrite = false` no modelo: o modelo
+continua projetando sombra, mas não escreve cor — então a imagem resultante tem apenas a
+sombra no chão, em preto com alpha 0,35 sobre transparente. Por ser um segundo passe, a
+geração leva ~2× o tempo; desmarque a opção se não quiser.
 
 ## Receitas de engine
 
@@ -266,7 +287,20 @@ func _ready() -> void:
     cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
     especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
     mesma biblioteca que roda no navegador.
-22. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
+22. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
+    resposta óbvia — exportar a sheet com e sem sombra — não dá controle nenhum. Sai uma
+    terceira imagem, `<nome>_shadow.png`, na mesma grade, obtida num segundo passe com
+    `colorWrite = false` nos materiais do modelo (ele continua no passe de sombras, só não
+    escreve cor). `metadata.json` ganha `shadow: { file, layout, note }` — `null` quando a
+    opção está desligada, para não inventar arquivo. O player tem um checkbox que desenha a
+    camada por baixo, então dá para ver o resultado antes de baixar.
+23. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
+    sombra nenhuma — correto, mas inútil para conferir o resultado. Como GIF não tem alpha
+    parcial, a alternativa honesta é o *dithering*: `alphaMask()` com uma matriz de Bayer
+    4×4 decide pixel a pixel, e 35 % de alpha vira 37,5 % de pontos opacos (6 de 16, o mais
+    perto que a grade chega). Vazio e opaco continuam exatos; só a faixa parcial é
+    pontilhada. É o padrão do seletor de fundo do GIF.
+24. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
     era 8, então todo pixel semitransparente sobrevivia como opaco: a sombra do chão
     (`ShadowMaterial` a 0,35 = alpha ~89) saía **preta sólida** e a serrilha da borda saía
     com a cor do modelo, formando um halo. Não era a luz — era o formato. Agora o limiar é
@@ -304,7 +338,7 @@ ou, direto:
 node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core.mjs
 ```
 
-**183 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
+**198 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a
@@ -312,7 +346,8 @@ azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto
 azimute), layout com padding e o clamp de 8192 px, o schema do `metadata.json` e o
 sidecar Aseprite, os blocos do GIF (`GIF89a`, um `NETSCAPE2.0`, `transparentIndex=0`,
 delays em centésimos), o recorte de alpha de 1 bit (a sombra a 35 % some em vez de virar
-preto sólido) e o GIF com fundo sem nenhum quadro transparente, rig de luz,
+preto sólido), o pontilhado de Bayer (35 % de alpha → 96 de 256 pontos, com vazio e opaco
+intactos), o GIF com fundo sem nenhum quadro transparente e o bloco `shadow` do metadata, rig de luz,
 `disposeHierarchy` com geometria compartilhada, os quatro presets, a escala travada e a
 amostra estática.
 

@@ -28,6 +28,7 @@ const el = {
   rngFrames: $('rngFrames'), framesVal: $('framesVal'),
   rngCell: $('rngCell'), cellVal: $('cellVal'), chkSsaa: $('chkSsaa'), selBackground: $('selBackground'),
   chkTurntable: $('chkTurntable'), chkShadow: $('chkShadow'),
+  chkShadowLayer: $('chkShadowLayer'),
   chkLightCamera: $('chkLightCamera'), rngLightAz: $('rngLightAz'), lightAzVal: $('lightAzVal'),
   rngLightInt: $('rngLightInt'), lightIntVal: $('lightIntVal'),
   btnReset: $('btnReset'),   // os botões de preset vêm de .preset[data-preset]
@@ -35,8 +36,9 @@ const el = {
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
   sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
-  dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
+  dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
+  chkPlayerShadow: $('chkPlayerShadow'),
   rngFps: $('rngFps'), fpsVal: $('fpsVal'), rngZoom: $('rngZoom'), zoomVal: $('zoomVal'),
   btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), selGifBg: $('selGifBg'), gifList: $('gifList'), status: $('status')
 };
@@ -562,6 +564,8 @@ function applySettings(s) {
   el.zoomVal.value = String(s.zoom);
   el.rngGifScale.value = String(s.gifScale);
   el.selGifBg.value = s.gifBg;
+  el.chkShadowLayer.checked = !!s.shadowLayer;
+  el.chkPlayerShadow.checked = !!s.playerShadow;
   el.chkLightCamera.checked = !!s.lightCamera;
   el.rngLightAz.value = String(s.lightAz);
   el.lightAzVal.value = String(s.lightAz);
@@ -594,6 +598,8 @@ function readSettings() {
     zoom: Number(el.rngZoom.value),
     gifScale: Number(el.rngGifScale.value),
     gifBg: el.selGifBg.value,
+    shadowLayer: el.chkShadowLayer.checked,
+    playerShadow: el.chkPlayerShadow.checked,
     lightCamera: el.chkLightCamera.checked,
     lightAz: Number(el.rngLightAz.value),
     lightIntensity: Number(el.rngLightInt.value) || 0
@@ -702,8 +708,8 @@ for (const [rangeKey, numKey] of NUMERIC_PAIRS) {
 const SETTING_CONTROLS = [
   el.selDirections, el.rngFrames, el.rngElevation, el.rngAzimuth, el.selPivot, el.rngCell,
   el.rngPadding, el.chkSsaa, el.chkLockScale, el.rngScaleLock, el.chkTurntable, el.selBackground,
-  el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale,
-  el.chkLightCamera, el.rngLightAz, el.rngLightInt
+  el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale, el.selGifBg,
+  el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow
 ];
 SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => { markPreset(null); saveSettings(null); }));
 
@@ -844,6 +850,7 @@ async function generate() {
   const pxPerUnit = Number(el.rngScaleLock.value) || 8;
   const turntable = el.chkTurntable.checked;
   const background = el.selBackground.value;
+  const wantShadowLayer = el.chkShadowLayer.checked && el.chkShadow.checked;
   const fps = Number(el.rngFps.value) || core.DEFAULT_FPS;
   const lightAz = THREE.MathUtils.degToRad(Number(el.rngLightAz.value) || 0);
   const lightFollow = el.chkLightCamera.checked;
@@ -950,8 +957,50 @@ async function generate() {
       const rect = core.cellRect(layout, pose.dir, pose.frame);
       sctx.drawImage(sheetRenderer.domElement, rect.x, rect.y, rect.w, rect.h);
       done++;
-      setProgress(done / poses.length, `renderizando ${done}/${poses.length} — dir ${String(pose.dir).padStart(2, '0')}, frame ${pose.frame + 1}`);
+      setProgress(0.02 + 0.68 * (done / poses.length), `renderizando ${done}/${poses.length} — dir ${String(pose.dir).padStart(2, '0')}, frame ${pose.frame + 1}`);
       await yieldToBrowser();
+    }
+
+    // 5b. Camada de sombra: segundo passe com o modelo sem escrever cor.
+    // `colorWrite = false` mantém o modelo no passe de sombras (ele continua
+    // projetando) mas o tira da imagem — o que sobra é só a sombra no chão, na
+    // MESMA grade da sheet. É isso que permite ligar/desligar a sombra no jogo.
+    let shadowSheet = null;
+    if (wantShadowLayer) {
+      setProgress(0.72, 'renderizando a camada de sombra…');
+      await yieldToBrowser();
+      shadowSheet = document.createElement('canvas');
+      shadowSheet.width = layout.w;
+      shadowSheet.height = layout.h;
+      const shctx = shadowSheet.getContext('2d', { willReadFrequently: true });
+      const materiais = [];
+      state.model.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) if (!materiais.includes(m)) materiais.push(m);
+      });
+      const colorWriteAntes = materiais.map((m) => m.colorWrite);
+      materiais.forEach((m) => { m.colorWrite = false; });
+      const groundAntes = ground.visible;
+      ground.visible = true;
+      sheetRenderer.setClearColor(0x000000, 0);   // a camada é sempre transparente
+      let doneShadow = 0;
+      for (const pose of poses) {
+        if (state.cancelled) break;
+        applyPose(pose);
+        lightFollowAz = lightFollow ? (turntable ? pose.camAzimuth : pose.modelAzimuth) : 0;
+        placeLights(lightAz, lightFollowAz);
+        core.placeCamera(camera, fit.center, pose.camAzimuth, elevation, distance);
+        sheetRenderer.render(scene, camera);
+        const rect = core.cellRect(layout, pose.dir, pose.frame);
+        shctx.drawImage(sheetRenderer.domElement, rect.x, rect.y, rect.w, rect.h);
+        doneShadow++;
+        setProgress(0.72 + 0.25 * (doneShadow / poses.length), `sombra ${doneShadow}/${poses.length}`);
+        await yieldToBrowser();
+      }
+      materiais.forEach((m, i) => { m.colorWrite = colorWriteAntes[i]; });
+      ground.visible = groundAntes;
+      applyBackground(background);
+      if (state.cancelled) throw new CancelledError();
     }
 
     // 6. metadados
@@ -959,11 +1008,18 @@ async function generate() {
       baseName: `${state.name}_${clip ? clip.name : 'static'}`,
       layout, directionCount: dirCount, elevationDeg: elevation, times, fps,
       loop: el.chkLoopPerfect.checked, ssaa, turntable, background,
-      azimuthOffsetDeg: azimuthOffset, pivot, lockScale, pxPerUnit: lockScale ? pxPerUnit : null
+      azimuthOffsetDeg: azimuthOffset, pivot, lockScale, pxPerUnit: lockScale ? pxPerUnit : null,
+      shadow: shadowSheet
+        ? {
+            file: `${state.name}_${clip ? clip.name : 'static'}_shadow.png`,
+            layout: 'row-per-direction',
+            note: 'mesma grade da sheet; desenhe antes do sprite e some quando quiser'
+          }
+        : null
     });
     const aseprite = core.buildAsepriteJson(meta);
 
-    state.result = { layout, meta, aseprite, sheet, fps, fit, frame, dirCount, turntable, half };
+    state.result = { layout, meta, aseprite, sheet, shadowSheet, fps, fit, frame, dirCount, turntable, half };
     state.player.dir = 0;
     state.player.frame = 0;
     showTab('results');
@@ -1079,6 +1135,10 @@ function drawPlayer() {
   const lado = cell / zoom;
   const sx = rect.x + (cell - lado) / 2;
   const sy = rect.y + (cell - lado) / 2;
+  // A sombra é uma camada: desenhada antes, e some quando o checkbox desliga.
+  if (r.shadowSheet && el.chkPlayerShadow.checked) {
+    ctx.drawImage(r.shadowSheet, sx, sy, lado, lado, 0, 0, PLAYER_BOX, PLAYER_BOX);
+  }
   ctx.drawImage(r.sheet, sx, sy, lado, lado, 0, 0, PLAYER_BOX, PLAYER_BOX);
 }
 
@@ -1120,6 +1180,13 @@ el.dlSheet.addEventListener('click', () => {
   if (!r) return;
   r.sheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.image), 'image/png');
 });
+el.dlShadow.addEventListener('click', () => {
+  const r = state.result;
+  if (!r || !r.shadowSheet) { setStatus('gere a sheet com "Camada de sombra separada" marcada', 'err'); return; }
+  r.shadowSheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.shadow.file), 'image/png');
+});
+el.chkPlayerShadow.addEventListener('change', drawPlayer);
+
 el.dlJson.addEventListener('click', () => {
   const r = state.result;
   if (r) downloadBlob(jsonBlob(r.meta), `${r.meta.image.replace(/_sheet\.png$/, '')}_metadata.json`);
@@ -1139,7 +1206,8 @@ const GIF_BG = { white: '#ffffff', dark: '#15181d' };
 async function buildGifs(r, sctx, delay) {
   const scale = Number(el.rngGifScale.value) || 1;
   const bg = el.selGifBg.value;
-  const transparente = bg === 'transparent';
+  const transparente = bg === 'transparent' || bg === 'dither';
+  const pontilhado = bg === 'dither';
   const cell = r.layout.cell;
   const size = Math.max(1, Math.round(cell * scale));
   const tmp = document.createElement('canvas');
@@ -1167,7 +1235,7 @@ async function buildGifs(r, sctx, delay) {
     out.push({
       dir: d,
       size,
-      bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay), transparent: transparente })
+      bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay), transparent: transparente, dither: pontilhado })
     });
     setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
     await yieldToBrowser();
@@ -1219,6 +1287,11 @@ async function downloadZip() {
       [`${base}.aseprite.json`]: strToU8(JSON.stringify(r.aseprite, null, 2)),
       'LEIA-ME.txt': strToU8(readmeDoZip(r))
     };
+    if (r.shadowSheet && r.meta.shadow) {
+      setProgress(0.2, 'empacotando a camada de sombra…');
+      const shadowBlob = await new Promise((resolve) => r.shadowSheet.toBlob(resolve, 'image/png'));
+      if (shadowBlob) files[r.meta.shadow.file] = new Uint8Array(await shadowBlob.arrayBuffer());
+    }
     setProgress(0.35, 'codificando os GIFs…');
     const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
     const gifs = await buildGifs(r, r.sheet.getContext('2d', { willReadFrequently: true }), delay);
@@ -1271,9 +1344,11 @@ async function generateGifs() {
     }
     setStatus(
       `${r.dirCount} GIFs prontos (${gifs[0].size}px) — ` +
-      (el.selGifBg.value === 'transparent'
-        ? 'fundo transparente, recorte em 50% (a sombra some: GIF não tem alpha parcial)'
-        : `composto sobre fundo ${el.selGifBg.value === 'white' ? 'branco' : 'escuro'} (a sombra aparece como no preview)`),
+      (el.selGifBg.value === 'dither'
+        ? 'transparente com sombra pontilhada (Bayer 4x4: alpha de 1 bit fingindo 35%)'
+        : el.selGifBg.value === 'transparent'
+          ? 'transparente, recorte em 50% (a sombra some: GIF não tem alpha parcial)'
+          : `composto sobre fundo ${el.selGifBg.value === 'white' ? 'branco' : 'escuro'} (a sombra aparece como no preview)`),
       'ok'
     );
   } catch (err) {

@@ -247,6 +247,8 @@
 
     <fieldset>
       <legend>Gerar</legend>
+      <div class="row"><input type="checkbox" id="chkShadowLayer" checked><label for="chkShadowLayer">Camada de sombra separada</label></div>
+      <div class="row"><span class="hint">Segunda sheet, mesma grade, só com a sombra — para você ligar e desligar no jogo.</span></div>
       <div class="row"><button id="btnGenerate" class="primary" style="flex:1" disabled>Gerar spritesheet</button></div>
       <div class="row"><button id="btnCancel" class="danger" style="flex:1" disabled>Cancelar</button></div>
       <div class="hint">linhas = direções · colunas = frames</div>
@@ -290,6 +292,7 @@
             </div>
             <div class="row wrap">
               <button id="dlSheet">sheet.png</button>
+              <button id="dlShadow">shadow.png</button>
               <button id="dlJson">metadata.json</button>
               <button id="dlAseprite">.aseprite.json</button>
             </div>
@@ -305,6 +308,7 @@
           <div style="flex:1; min-width:240px">
             <div class="row wrap">
               <button id="btnPlayerPlay">Pause</button>
+              <input type="checkbox" id="chkPlayerShadow" checked><label for="chkPlayerShadow">sombra</label>
               <label for="playerDir">direção</label>
               <select id="playerDir" style="flex:0 1 auto"></select>
             </div>
@@ -321,9 +325,10 @@
           <button id="btnGif">Gerar GIFs</button>
           <label for="selGifBg">fundo</label>
           <select id="selGifBg" style="flex:0 1 auto" title="GIF tem alpha de 1 bit: com fundo transparente a sombra some; com fundo ela é composta de verdade">
-            <option value="transparent" selected>transparente</option>
-            <option value="white">branco</option>
-            <option value="dark">escuro</option>
+            <option value="transparent">transparente (sem sombra)</option>
+            <option value="dither" selected>transparente + sombra pontilhada</option>
+            <option value="white">fundo branco (sombra real)</option>
+            <option value="dark">fundo escuro (sombra real)</option>
           </select>
           <label for="rngGifScale">escala</label>
           <select id="rngGifScale" style="flex:0 1 auto">
@@ -331,7 +336,7 @@
             <option value="0.5">50%</option>
             <option value="0.25">25%</option>
           </select>
-          <span class="hint">transparente = recorte em 50% (sem halo, sem sombra)</span>
+          <span class="hint">GIF tem alpha de 1 bit: a sombra ou é composta num fundo, ou sai pontilhada</span>
         </div>
         <div id="gifList" class="row wrap"></div>
       </fieldset>
