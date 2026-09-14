@@ -38,7 +38,7 @@ const el = {
   dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   rngFps: $('rngFps'), fpsVal: $('fpsVal'), rngZoom: $('rngZoom'), zoomVal: $('zoomVal'),
-  btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), gifList: $('gifList'), status: $('status')
+  btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), selGifBg: $('selGifBg'), gifList: $('gifList'), status: $('status')
 };
 const faltando = Object.entries(el).filter(([, node]) => !node).map(([k]) => k);
 if (faltando.length) console.error('ids ausentes no index.html:', faltando.join(', '));
@@ -204,7 +204,7 @@ function placeLights(spinRad, followAz = 0) {
 
 /** Aplica os controles de luz do painel (chamado ao mudar qualquer um deles). */
 function applyLightRig() {
-  keyLight.intensity = (Number(el.rngLightInt.value) || 0) / 10;
+  keyLight.intensity = Number(el.rngLightInt.value) || 0;
   placeLights(THREE.MathUtils.degToRad(Number(el.rngLightAz.value) || 0), lightFollowAz);
 }
 
@@ -537,35 +537,36 @@ function markPreset(name) {
 function applySettings(s) {
   el.selDirections.value = String(s.directions);
   el.rngFrames.value = String(s.frames);
-  el.framesVal.textContent = String(s.frames);
+  el.framesVal.value = String(s.frames);
   el.rngElevation.value = String(s.elevation);
-  el.elevationVal.textContent = `${s.elevation}°`;
+  el.elevationVal.value = String(s.elevation);
   el.rngAzimuth.value = String(s.azimuthOffset);
-  el.azimuthVal.textContent = `${s.azimuthOffset}°`;
+  el.azimuthVal.value = String(s.azimuthOffset);
   el.selPivot.value = s.pivot;
   el.rngCell.value = String(s.cell);
-  el.cellVal.textContent = `${s.cell} px`;
+  el.cellVal.value = String(s.cell);
   el.rngPadding.value = String(s.padding);
-  el.paddingVal.textContent = `${s.padding} px`;
+  el.paddingVal.value = String(s.padding);
   el.chkSsaa.checked = !!s.ssaa;
   el.chkLockScale.checked = !!s.lockScale;
   el.rngScaleLock.value = String(s.pxPerUnit);
-  el.scaleLockVal.textContent = `${Number(s.pxPerUnit).toFixed(2)} px/un`;
+  el.scaleLockVal.value = String(s.pxPerUnit);
   el.rowScaleLock.hidden = !s.lockScale;
   el.chkTurntable.checked = !!s.turntable;
   el.selBackground.value = s.background;
   el.chkShadow.checked = !!s.shadow;
   el.chkLoopPerfect.checked = !!s.loopPerfect;
   el.rngFps.value = String(s.fps);
-  el.fpsVal.textContent = String(s.fps);
+  el.fpsVal.value = String(s.fps);
   el.rngZoom.value = String(s.zoom);
-  el.zoomVal.textContent = `${s.zoom}x`;
+  el.zoomVal.value = String(s.zoom);
   el.rngGifScale.value = String(s.gifScale);
+  el.selGifBg.value = s.gifBg;
   el.chkLightCamera.checked = !!s.lightCamera;
   el.rngLightAz.value = String(s.lightAz);
-  el.lightAzVal.textContent = `${s.lightAz}°`;
-  el.rngLightInt.value = String(Math.round(s.lightIntensity * 10));
-  el.lightIntVal.textContent = (Number(s.lightIntensity) || 0).toFixed(1);
+  el.lightAzVal.value = String(s.lightAz);
+  el.rngLightInt.value = String(s.lightIntensity);
+  el.lightIntVal.value = String(s.lightIntensity);
   ground.visible = !!s.shadow;
   applyLightRig();
   framePreview();
@@ -592,9 +593,10 @@ function readSettings() {
     fps: Number(el.rngFps.value),
     zoom: Number(el.rngZoom.value),
     gifScale: Number(el.rngGifScale.value),
+    gifBg: el.selGifBg.value,
     lightCamera: el.chkLightCamera.checked,
     lightAz: Number(el.rngLightAz.value),
-    lightIntensity: (Number(el.rngLightInt.value) || 0) / 10
+    lightIntensity: Number(el.rngLightInt.value) || 0
   };
 }
 
@@ -656,23 +658,45 @@ el.scrub.addEventListener('input', () => {
   el.scrubVal.textContent = `${(Number(el.scrub.value) * clip.duration).toFixed(2)}s`;
 });
 el.chkShadow.addEventListener('change', () => { ground.visible = el.chkShadow.checked; });
-el.rngElevation.addEventListener('input', () => { el.elevationVal.textContent = `${el.rngElevation.value}°`; framePreview(); });
-el.rngAzimuth.addEventListener('input', () => { el.azimuthVal.textContent = `${el.rngAzimuth.value}°`; });
-el.rngPadding.addEventListener('input', () => { el.paddingVal.textContent = `${el.rngPadding.value} px`; });
+el.rngElevation.addEventListener('input', () => framePreview());
 el.chkLockScale.addEventListener('change', () => {
   el.rowScaleLock.hidden = !el.chkLockScale.checked;
   if (!el.chkLockScale.checked) return;
   const ppu = calibrateScaleLock();
   if (ppu) setStatus(`escala travada em ${ppu.toFixed(2)} px/unidade (calibrada neste modelo) — mude para combinar com outros projetos`, 'ok');
 });
-el.rngScaleLock.addEventListener('input', () => { el.scaleLockVal.textContent = `${Number(el.rngScaleLock.value).toFixed(2)} px/un`; });
-el.rngLightAz.addEventListener('input', () => { el.lightAzVal.textContent = `${el.rngLightAz.value}°`; applyLightRig(); });
-el.rngLightInt.addEventListener('input', () => { el.lightIntVal.textContent = ((Number(el.rngLightInt.value) || 0) / 10).toFixed(1); applyLightRig(); });
+el.rngLightAz.addEventListener('input', applyLightRig);
+el.rngLightInt.addEventListener('input', applyLightRig);
 el.chkLightCamera.addEventListener('change', applyLightRig);
-el.rngFrames.addEventListener('input', () => { el.framesVal.textContent = el.rngFrames.value; });
-el.rngCell.addEventListener('input', () => { el.cellVal.textContent = `${el.rngCell.value} px`; });
-el.rngFps.addEventListener('input', () => { el.fpsVal.textContent = el.rngFps.value; });
-el.rngZoom.addEventListener('input', () => { el.zoomVal.textContent = `${el.rngZoom.value}x`; drawPlayer(); });
+el.rngZoom.addEventListener('input', drawPlayer);
+
+/* ---- slider e campo numérico são o mesmo controle ----
+ * Cada slider tem um input[type=number] do lado: dá para digitar 512 em vez de
+ * arrastar até o fim. O número é clampado nos limites do slider e dispara os
+ * MESMOS handlers, então não existe um segundo caminho de efeito colateral. */
+const NUMERIC_PAIRS = [
+  ['rngElevation', 'elevationVal'], ['rngAzimuth', 'azimuthVal'], ['rngFrames', 'framesVal'],
+  ['rngCell', 'cellVal'], ['rngPadding', 'paddingVal'], ['rngScaleLock', 'scaleLockVal'],
+  ['rngFps', 'fpsVal'], ['rngZoom', 'zoomVal'], ['rngLightAz', 'lightAzVal'], ['rngLightInt', 'lightIntVal']
+];
+for (const [rangeKey, numKey] of NUMERIC_PAIRS) {
+  const range = el[rangeKey];
+  const num = el[numKey];
+  if (!range || !num) continue;
+  range.addEventListener('input', () => { num.value = range.value; });
+  const commit = (rewrite) => {
+    if (num.value === '') return;
+    const min = Number(range.min);
+    const max = Number(range.max);
+    const v = Math.min(max, Math.max(min, Number(num.value)));
+    if (!Number.isFinite(v)) return;
+    range.value = String(v);
+    if (rewrite) num.value = String(v);   // devolve o valor clampado ao sair do campo
+    range.dispatchEvent(new Event('input'));
+  };
+  num.addEventListener('input', () => commit(false));
+  num.addEventListener('change', () => commit(true));
+}
 
 // Qualquer ajuste manual invalida a predefinição destacada e vai para a memória.
 const SETTING_CONTROLS = [
@@ -748,7 +772,7 @@ function calibrateScaleLock() {
   const ppu = core.pxPerUnitToFit(Number(el.rngCell.value), half);
   const snapped = Math.min(64, Math.max(0.05, Math.round(ppu * 20) / 20));
   el.rngScaleLock.value = String(snapped);
-  el.scaleLockVal.textContent = `${snapped.toFixed(2)} px/un`;
+  el.scaleLockVal.value = String(snapped);   // é um input: textContent não apareceria
   markPreset(null);
   saveSettings(null);
   return snapped;
@@ -1110,8 +1134,12 @@ el.dlAseprite.addEventListener('click', () => {
  * `rngGifScale` reduz a célula antes de quantizar: GIF é 256 cores por quadro,
  * então um sprite de 512px desperdiça paleta — e o arquivo fica enorme.
  */
+const GIF_BG = { white: '#ffffff', dark: '#15181d' };
+
 async function buildGifs(r, sctx, delay) {
   const scale = Number(el.rngGifScale.value) || 1;
+  const bg = el.selGifBg.value;
+  const transparente = bg === 'transparent';
   const cell = r.layout.cell;
   const size = Math.max(1, Math.round(cell * scale));
   const tmp = document.createElement('canvas');
@@ -1125,10 +1153,22 @@ async function buildGifs(r, sctx, delay) {
     for (let f = 0; f < r.layout.cols; f++) {
       const rect = core.cellRect(r.layout, d, f);
       tctx.clearRect(0, 0, size, size);
+      // GIF tem alpha de 1 bit. Com fundo, a sombra (preta a 35%) é composta de
+      // verdade e o GIF fica igual ao preview. Sem fundo ela não tem como
+      // existir: o corte em 50% a remove — o que NÃO se pode fazer é deixá-la
+      // semitransparente, porque aí ela sai preta sólida (era o bug).
+      if (!transparente) {
+        tctx.fillStyle = GIF_BG[bg] || '#ffffff';
+        tctx.fillRect(0, 0, size, size);
+      }
       tctx.drawImage(r.sheet, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
       frames.push(tctx.getImageData(0, 0, size, size).data);
     }
-    out.push({ dir: d, size, bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay) }) });
+    out.push({
+      dir: d,
+      size,
+      bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay), transparent: transparente })
+    });
     setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
     await yieldToBrowser();
   }
@@ -1229,7 +1269,13 @@ async function generateGifs() {
       fig.append(img, cap, link);
       el.gifList.appendChild(fig);
     }
-    setStatus(`${r.dirCount} GIFs prontos (${gifs[0].size}px) — transparência por índice 0 (magenta)`, 'ok');
+    setStatus(
+      `${r.dirCount} GIFs prontos (${gifs[0].size}px) — ` +
+      (el.selGifBg.value === 'transparent'
+        ? 'fundo transparente, recorte em 50% (a sombra some: GIF não tem alpha parcial)'
+        : `composto sobre fundo ${el.selGifBg.value === 'white' ? 'branco' : 'escuro'} (a sombra aparece como no preview)`),
+      'ok'
+    );
   } catch (err) {
     console.error(err);
     setStatus(`falha no GIF: ${err.message}`, 'err');

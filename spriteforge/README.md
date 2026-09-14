@@ -111,6 +111,10 @@ cola tudo para colar num relato de bug.
 | Loop perfeito | on/off | descarta o último frame (idêntico ao primeiro) |
 | **Zoom (player)** | 1–6× | lupa **dentro** da caixa fixa de 256 px: não muda o layout |
 | **Escala do GIF** | 100 / 50 / 25 % | reduz antes de quantizar (GIF tem 256 cores por quadro) |
+| **Fundo do GIF** | transparente / branco / escuro | GIF tem alpha de **1 bit**: transparente recorta em 50 % (sem halo, mas a sombra some); com fundo ela é composta de verdade e o GIF fica igual ao preview |
+
+Todo slider tem um **campo numérico** do lado: dá para digitar `512` em vez de arrastar.
+O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 
 ## O que sai
 
@@ -262,7 +266,18 @@ func _ready() -> void:
     cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
     especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
     mesma biblioteca que roda no navegador.
-22. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+22. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
+    era 8, então todo pixel semitransparente sobrevivia como opaco: a sombra do chão
+    (`ShadowMaterial` a 0,35 = alpha ~89) saía **preta sólida** e a serrilha da borda saía
+    com a cor do modelo, formando um halo. Não era a luz — era o formato. Agora o limiar é
+    128 (o padrão de 1 bit) e há um seletor de fundo: com fundo, a sombra é composta antes
+    de quantizar e o GIF bate com o preview; sem fundo, ela é removida em vez de virar
+    mancha. `alphaMask()` existe separado do `encodeGif` justamente para isso ser testável
+    sem decodificar GIF.
+23. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
+    clamp na faixa do slider e disparando os mesmos handlers — não há um segundo caminho
+    de efeito colateral para divergir.
+24. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 
@@ -289,15 +304,17 @@ ou, direto:
 node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core.mjs
 ```
 
-**156 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
+**183 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a
 89°, bounds assinados e os três pivots (inclusive a estabilidade do pivot em qualquer
 azimute), layout com padding e o clamp de 8192 px, o schema do `metadata.json` e o
 sidecar Aseprite, os blocos do GIF (`GIF89a`, um `NETSCAPE2.0`, `transparentIndex=0`,
-delays em centésimos), rig de luz, `disposeHierarchy` com geometria compartilhada, os
-quatro presets e a amostra estática.
+delays em centésimos), o recorte de alpha de 1 bit (a sombra a 35 % some em vez de virar
+preto sólido) e o GIF com fundo sem nenhum quadro transparente, rig de luz,
+`disposeHierarchy` com geometria compartilhada, os quatro presets, a escala travada e a
+amostra estática.
 
 Lint (o CI roda exatamente isto):
 

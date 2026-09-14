@@ -305,6 +305,36 @@ ok(gif.length > 200, `tamanho plausível (${gif.length} bytes)`);
 const opaco = core.encodeGif({ width: 2, height: 2, frames: [new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255])] });
 ok(opaco[0] === 0x47 && opaco[opaco.length - 1] === 0x3b, 'GIF sem transparência também codifica');
 
+/* ---- alpha de 1 bit: a sombra e a serrilha ----
+ * GIF não tem alpha parcial. Com o corte antigo em 8, a sombra do chão
+ * (ShadowMaterial 0,35 => alpha ~89) virava preto sólido e a borda
+ * antisserrilhada virava um halo com a cor do modelo. */
+const px = (a) => new Uint8ClampedArray([0, 0, 0, a]);
+ok(core.GIF_ALPHA_CUT === 128, `corte de alpha em 128 (${core.GIF_ALPHA_CUT})`);
+ok(core.alphaMask(px(89))[0] === 1, 'sombra a 35% (alpha 89) vira transparente');
+ok(core.alphaMask(px(89), 8)[0] === 0, 'com o corte antigo (8) ela sobrevivia — era o preto sólido');
+ok(core.alphaMask(px(127))[0] === 1 && core.alphaMask(px(128))[0] === 0, 'o limiar é exatamente 128');
+ok(core.alphaMask(px(0))[0] === 1 && core.alphaMask(px(255))[0] === 0, 'vazio some, opaco fica');
+const borda = core.alphaMask(new Uint8ClampedArray([200, 120, 60, 90]));
+ok(borda[0] === 1, 'pixel de borda com alpha parcial não vira mais halo opaco');
+const sombra = new Uint8ClampedArray(4 * 4);
+for (let i = 0; i < 4; i++) sombra.set([0, 0, 0, 89], i * 4);
+const gifSombra = core.encodeGif({ width: 2, height: 2, frames: [sombra] });
+let transparenteSombra = 0;
+for (let i = 0; i < gifSombra.length - 5; i++) if (gifSombra[i] === 0x21 && gifSombra[i + 1] === 0xf9 && (gifSombra[i + 3] & 0x01)) transparenteSombra++;
+ok(transparenteSombra === 1, 'um quadro só de sombra codifica como transparente');
+
+/* ---- GIF com fundo (a sombra composta de verdade) ---- */
+const gifFundo = core.encodeGif({ width: CELL, height: CELL, frames, delays: t.map(() => 83), transparent: false });
+ok(gifFundo[0] === 0x47 && gifFundo[gifFundo.length - 1] === 0x3b, 'GIF com fundo é um GIF válido');
+let gceFundo = 0, transFundo = 0;
+for (let i = 0; i < gifFundo.length - 5; i++) {
+  if (gifFundo[i] === 0x21 && gifFundo[i + 1] === 0xf9) { gceFundo++; if (gifFundo[i + 3] & 0x01) transFundo++; }
+}
+ok(gceFundo === N, `${N} quadros no GIF com fundo (${gceFundo})`);
+ok(transFundo === 0, 'nenhum quadro declara transparência quando há fundo');
+ok((Buffer.from(gifFundo).toString('latin1').match(/NETSCAPE2\.0/g) || []).length === 1, 'o loop continua presente no GIF com fundo');
+
 /* ---------------- luzes ---------------- */
 const mk = (x, y, z) => ({ light: new THREE.DirectionalLight(0xffffff, 1), dir: new THREE.Vector3(x, y, z).normalize() });
 const rig = [mk(4, 8, 6), mk(-7, 3, 4), mk(-3, 5, -8)];
@@ -340,6 +370,7 @@ ok(root.children.length === 2, 'disposeHierarchy não desmonta a cena (app.js fa
 /* ---------------- presets ---------------- */
 ok(core.DEFAULT_SETTINGS.directions === 8 && core.DEFAULT_SETTINGS.cell === 128 && core.DEFAULT_SETTINGS.elevation === 18, 'defaults do site');
 ok(core.DEFAULT_SETTINGS.padding === 0 && core.DEFAULT_SETTINGS.lockScale === false, 'padding zero e escala livre por padrão');
+ok(core.DEFAULT_SETTINGS.gifBg === 'transparent' && core.DEFAULT_SETTINGS.lightIntensity === 2.6, 'GIF transparente e luz 2.6 por padrão');
 ok(core.presetSettings('char2d').pivot === 'base' && core.presetSettings('char2d').elevation === 0, 'preset personagem: pivot base, câmera no horizonte');
 ok(core.presetSettings('iso').elevation === 30 && core.presetSettings('iso').pivot === 'center', 'preset isométrico: 30 graus, pivot centro');
 ok(core.presetSettings('iso').lockScale === false, 'preset isométrico NÃO trava a escala (trava absoluta cortava modelos grandes)');

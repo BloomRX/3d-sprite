@@ -16,8 +16,30 @@ export const SCALE_FIX = 0.86;
 /** Limite prático de textura/sheet: acima disso a sheet é clampada (e a célula reduzida). */
 export const MAX_SHEET_SIDE = 8192;
 export const DEFAULT_FPS = 12;
-/** Pixels com alpha abaixo disso viram índice 0 (transparente) no GIF. */
-export const GIF_ALPHA_CUT = 8;
+/**
+ * Pixels com alpha abaixo disso viram o índice 0 (transparente) no GIF.
+ *
+ * GIF tem alpha de **1 bit**: não existe "35% opaco". O corte antigo era 8, e o
+ * efeito era duplo e visível: a sombra (ShadowMaterial a 0,35 = alpha ~89)
+ * sobrevivia como cor e saía **preta sólida**, e os pixels de borda
+ * antisserrilhada (alpha parcial com a cor do modelo) saíam opacos, formando um
+ * halo em volta do sprite. 128 é o limiar padrão de 1 bit: mais transparente que
+ * 50% some, o resto fica opaco. Quem quiser a sombra de verdade usa um GIF com
+ * fundo (ela é composta antes de quantizar).
+ */
+export const GIF_ALPHA_CUT = 128;
+
+/**
+ * Máscara de transparência: 1 onde o pixel vira o índice 0.
+ * Separada do encodeGif porque é a decisão que define se a sombra e a serrilha
+ * somem ou viram mancha — e assim dá para testá-la sem decodificar GIF.
+ */
+export function alphaMask(rgba, alphaCut = GIF_ALPHA_CUT) {
+  const count = rgba.length >> 2;
+  const mask = new Uint8Array(count);
+  for (let p = 0; p < count; p++) mask[p] = rgba[p * 4 + 3] < alphaCut ? 1 : 0;
+  return mask;
+}
 /**
  * Folga (normalizada, medida da borda) entre o modelo e a borda da célula nos
  * pivots "base"/"top". É derivada do SCALE_FIX: a âncora encosta em ±SCALE_FIX
@@ -35,7 +57,7 @@ export const DEFAULT_SETTINGS = {
   cell: 128, padding: 0, ssaa: false, lockScale: false, pxPerUnit: 8,
   turntable: false, background: 'transparent', shadow: true,
   lightCamera: false, lightAz: 34, lightIntensity: 2.6,
-  loopPerfect: true, fps: 12, zoom: 1, gifScale: 1
+  loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'transparent'
 };
 
 /**
@@ -530,28 +552,38 @@ export function buildAsepriteJson(meta) {
  * recebem RGB magenta ANTES de quantizar para que o magenta exista de fato na
  * paleta e nenhum pixel opaco escuro caia por engano no índice 0.
  *
+ * `transparent: false` é para o GIF com fundo: aí ninguém vira índice 0 e a
+ * paleta não precisa reservar o magenta (e nenhum pixel escuro corre o risco de
+ * cair no índice 0 e virar buraco).
+ *
  * @param {Array<Uint8ClampedArray>} frames RGBA, comprimento w*h*4
  */
-export function encodeGif({ width, height, frames, delays = [], repeat = 0 }) {
+export function encodeGif({ width, height, frames, delays = [], repeat = 0, alphaCut = GIF_ALPHA_CUT, transparent = true }) {
   const gif = GIFEncoder();
   const count = width * height;
   frames.forEach((rgba, i) => {
     const data = new Uint8ClampedArray(rgba);
-    for (let p = 0; p < count; p++) {
-      if (data[p * 4 + 3] < GIF_ALPHA_CUT) {
-        data[p * 4] = 255;
-        data[p * 4 + 1] = 0;
-        data[p * 4 + 2] = 255;
+    const mask = alphaMask(rgba, alphaCut);
+    let palette;
+    if (transparent) {
+      for (let p = 0; p < count; p++) {
+        if (mask[p]) {
+          data[p * 4] = 255;
+          data[p * 4 + 1] = 0;
+          data[p * 4 + 2] = 255;
+        }
       }
+      palette = quantize(data, 255);
+      palette[0] = [255, 0, 255];
+    } else {
+      palette = quantize(data, 256);
     }
-    const palette = quantize(data, 255);
-    palette[0] = [255, 0, 255];
     const index = applyPalette(data, palette, 'rgb565');
-    for (let p = 0; p < count; p++) if (rgba[p * 4 + 3] < GIF_ALPHA_CUT) index[p] = 0;
+    if (transparent) for (let p = 0; p < count; p++) if (mask[p]) index[p] = 0;
     gif.writeFrame(index, width, height, {
       palette,
       delay: Math.round(delays[i] ?? 1000 / DEFAULT_FPS),
-      transparent: true,
+      transparent,
       transparentIndex: 0,
       repeat,
       first: i === 0
