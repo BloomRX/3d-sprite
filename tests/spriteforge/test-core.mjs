@@ -352,6 +352,34 @@ for (let i = 0; i < gifDither.length - 5; i++) if (gifDither[i] === 0x21 && gifD
 ok(transDither === N, `os ${N} quadros do GIF pontilhado continuam transparentes (${transDither})`);
 ok(core.BAYER4.length === 4 && core.BAYER4.every((l) => l.length === 4), 'matriz de Bayer 4x4');
 
+/* ---- OrbitControls vendido casa com o three vendido ---- */
+const orbit = await import(new URL('../../spriteforge/app/vendor/OrbitControls.js', import.meta.url));
+ok(typeof orbit.OrbitControls === 'function', 'vendor/OrbitControls.js carrega e exporta a classe');
+{
+  // Elemento DOM mínimo: o Controls só registra ouvintes de evento nele.
+  const falso = {
+    addEventListener() {}, removeEventListener() {}, style: {},
+    ownerDocument: { addEventListener() {}, removeEventListener() {} },
+    setPointerCapture() {}, releasePointerCapture() {}, getRootNode() { return this; }
+  };
+  const cam = new THREE.PerspectiveCamera(35, 1, 0.01, 5000);
+  cam.position.set(3, 4, 5);
+  const ctrl = new orbit.OrbitControls(cam, falso);
+  ok(ctrl.target instanceof THREE.Vector3, 'instancia com a câmera de preview');
+  ctrl.enableDamping = true;
+  ctrl.dampingFactor = 0.08;
+  ctrl.target.set(0, 1, 0);
+  ctrl.update();
+  ok(Math.abs(cam.position.x - 3) < 1e-9 && Math.abs(cam.position.y - 4) < 1e-9,
+    'update() sem entrada do mouse não arrasta a câmera');
+  cam.position.set(0, 10, 0.001);
+  ctrl.update();
+  ok(Math.abs(cam.position.y - 10) < 1e-9,
+    'posição definida por fora é respeitada — é o que framePreview() faz');
+  ctrl.dispose();
+  ok(true, 'dispose() não explode');
+}
+
 /* ---- a cor transparente não pode roubar uma cor de verdade ---- */
 ok(JSON.stringify(core.reservarTransparente([[0, 0, 0]])) === '[[255,0,255],[0,0,0]]',
   'paleta de UMA cor (quadro só de sombra) ganha o magenta sem perder o preto');

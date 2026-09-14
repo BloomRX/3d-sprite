@@ -98,6 +98,17 @@
     background:rgba(10,13,17,.72); color:var(--mut); font-size:11px; pointer-events:none;
     border:1px solid var(--line);
   }
+  #btnReframe{
+    position:absolute; right:10px; top:10px; z-index:6;
+    background:rgba(20,25,32,.82); border:1px solid var(--line); color:var(--fg);
+    border-radius:6px; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer;
+  }
+  #btnReframe:hover{border-color:var(--acc)}
+  #orbitHint{
+    position:absolute; left:10px; bottom:10px; z-index:6; pointer-events:none;
+    color:var(--mut); font-size:11px; background:rgba(20,25,32,.6);
+    padding:3px 7px; border-radius:5px;
+  }
   #dropHint{
     position:absolute; inset:0; display:none; place-items:center; z-index:5;
     background:rgba(10,13,17,.82); border:2px dashed var(--acc); color:var(--acc);
@@ -275,6 +286,8 @@
     <div class="pane on" id="viewPane">
       <div id="viewportWrap">
         <canvas id="viewport"></canvas>
+        <button id="btnReframe" title="volta a câmera para o enquadramento automático">⟲ Reenquadrar</button>
+        <div id="orbitHint">arraste = girar · roda = zoom · botão direito = deslocar</div>
         <div class="badge" id="viewBadge">arraste um modelo aqui</div>
         <div id="dropHint">Solte o modelo (.glb, .gltf, .obj, .fbx, .stl, .ply)<br><span class="hint">.gltf com .bin/texturas: arraste todos juntos</span></div>
         <div id="loadError"></div>

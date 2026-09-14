@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { OrbitControls } from './vendor/OrbitControls.js';
 import { zipSync, strToU8 } from './libs/fflate.module.js';
 import * as core from './core.js';
 
@@ -35,6 +36,7 @@ const el = {
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
   sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
+  btnReframe: $('btnReframe'),
   dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlSheetShadow: $('dlSheetShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   chkPlayerShadow: $('chkPlayerShadow'),
@@ -71,6 +73,13 @@ const setStatus = (msg, kind = '') => {
  * ================================================================== */
 const scene = new THREE.Scene();
 const previewCamera = new THREE.PerspectiveCamera(35, 1, 0.01, 5000);
+// Órbita no preview (D3 do spec). Só na câmera de preview: a geração cria a sua
+// própria câmera ortográfica, então girar aqui nunca muda o que vai para a sheet.
+const controls = new OrbitControls(previewCamera, el.viewport);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 0.05;
+controls.maxDistance = 4000;
 
 /**
  * Criar um WebGLRenderer é o único ponto onde este app morre sem dizer por quê
@@ -250,6 +259,10 @@ function framePreview() {
   previewCamera.near = dist / 1000;
   previewCamera.far = dist * 10;
   previewCamera.updateProjectionMatrix();
+  // A órbita passa a girar em torno do centro do modelo, e aceita a posição nova:
+  // o OrbitControls recalcula a esférica a partir da câmera a cada update().
+  controls.target.copy(center);
+  controls.update();
 }
 
 function tick() {
@@ -267,6 +280,7 @@ function tick() {
       el.scrubVal.textContent = `${(t * clip.duration).toFixed(2)}s`;
     }
   }
+  controls.update();      // damping: precisa rodar todo quadro
   if (renderer) renderer.render(scene, previewCamera);
 }
 
@@ -628,6 +642,11 @@ presetButtons.forEach((btn) => btn.addEventListener('click', () => {
   saveSettings(name);
   setStatus(`predefinição "${btn.textContent.trim()}" aplicada — ajuste o que quiser e gere`, 'ok');
 }));
+
+el.btnReframe.addEventListener('click', () => {
+  framePreview();
+  setStatus('câmera reenquadrada no modelo', 'ok');
+});
 
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
 el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
