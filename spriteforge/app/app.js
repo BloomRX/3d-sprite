@@ -312,9 +312,10 @@ function tick() {
     state.mixer.update(dt);
     const clip = state.clips[state.clipIndex];
     if (clip) {
-      const t = (state.mixer.time % clip.duration) / clip.duration;
-      el.scrub.value = String(t);
-      el.scrubVal.textContent = `${(t * clip.duration).toFixed(2)}s`;
+      // `frac` e não `t`: o `t()` do escopo externo é a função de tradução.
+      const frac = (state.mixer.time % clip.duration) / clip.duration;
+      el.scrub.value = String(frac);
+      el.scrubVal.textContent = `${(frac * clip.duration).toFixed(2)}s`;
     }
   }
   controls.update();      // damping: precisa rodar todo quadro
@@ -771,9 +772,9 @@ async function salvarProjeto() {
         suggestedName: sugerido,
         types: [{ description: 'Projeto do SpriteForge', accept: { 'application/json': ['.spriteforge.json', '.json'] } }]
       });
-      const gravador = await handle.createWritable();
-      await gravador.write(texto);
-      await gravador.close();
+      const fluxo = await handle.createWritable();
+      await fluxo.write(texto);
+      await fluxo.close();
       gravador.marcar('projetoSalvar');
       setStatus(t('projeto salvo em {nome}', { nome: handle.name || sugerido }), 'ok');
       return;
@@ -783,6 +784,7 @@ async function salvarProjeto() {
       // trabalho, cai no download.
     }
   }
+  gravador.marcar('projetoSalvar');
   downloadBlob(new Blob([texto], { type: 'application/json' }), sugerido);
   setStatus(t('projeto baixado como {nome} — mova para a pasta projetos/ se quiser', { nome: sugerido }), 'ok');
 }

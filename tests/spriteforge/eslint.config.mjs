@@ -24,6 +24,9 @@ export default [
       'no-dupe-args': 'error',
       'no-dupe-class-members': 'error',
       'no-const-assign': 'error',
+      // Sombrear um nome do escopo externo já causou bug real aqui: um stream
+      // chamado `gravador` escondeu o gravador de sessão e `.marcar()` estourou.
+      'no-shadow': 'error',
       'no-func-assign': 'error',
       'no-import-assign': 'error',
       'no-unreachable': 'error',
