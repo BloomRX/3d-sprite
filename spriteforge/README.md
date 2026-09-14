@@ -255,13 +255,31 @@ clique — por isso o botão pode aparecer como `Pasta do app: 3d-sprite — cli
 autorizar`. Um clique resolve. E não há como o app escrever na própria pasta sem você
 tê-la escolhido uma vez: o navegador não permite.
 
+### A sombra separada é preta opaca
+
+`_shadow.png` sai **preto 100% opaco**, e não com 35% de alpha. Duas razões, e a primeira
+veio de um relato real:
+
+1. **Parecia uma imagem vazia.** O censo de uma sessão mostrou 1.315.657 pixels com alpha
+   numa folha de 25.165.824 — a sombra estava lá, só que com alpha 89 (35%). Em qualquer
+   visualizador que mostre transparência sobre fundo escuro, preto a 35% some.
+2. **Atenuação dupla.** A camada separada existe para o jogo compor e decidir a força da
+   sombra. Pré-aplicar 35% num sprite que a engine vai modular de novo dá 0,35 × o que
+   você configurar.
+
+A opacidade de 35% continua valendo onde a sombra fica **dentro** da imagem: na folha
+comum (sem camada separada) e em `_com_sombra.png`, que recompõe a sombra a 35% na hora.
+O preview mostra a mesma coisa. A constante é uma só (`SOMBRA_OPACIDADE`), então os três
+lugares não têm como divergir.
+
 ### Se a sombra sair vazia
 
 A geração conta os pixels da camada de sombra ao terminar. Se não houver nenhum, a barra
 de status avisa **na hora** e o relatório da sessão guarda os números (pixels visíveis,
 caixa ocupada, elevação, pivô, azimute e intensidade da luz). Sem isso, "a sombra saiu
 vazia" é impossível de diagnosticar de longe — pode ser a luz, o chão fora do
-enquadramento, a opacidade ou o export, e cada um tem uma correção diferente.
+enquadramento, a opacidade ou o export, e cada um tem uma correção diferente. Foi esse
+censo que mostrou que a sombra acima **não** estava vazia: estava invisível.
 
 ## Salvando um projeto
 

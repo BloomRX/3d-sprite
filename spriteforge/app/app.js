@@ -264,8 +264,15 @@ function applyLightRig() {
   placeLights(THREE.MathUtils.degToRad(Number(el.rngLightAz.value) || 0), lightFollowAz);
 }
 
+/** Opacidade da sombra QUANDO ELA FICA NO PERSONAGEM (folha comum e composta).
+ * A camada separada sai PRETA OPACA de propósito: quem compõe é a engine, e é ela
+ * quem decide a força da sombra. Pré-aplicar 35% num sprite que o jogo vai
+ * modular dá atenuação dupla — e, pior, a imagem parece vazia em qualquer viewer
+ * que mostre transparência sobre fundo escuro. */
+const SOMBRA_OPACIDADE = 0.35;
+
 // Chão que só recebe sombra: com ShadowMaterial o fundo continua transparente.
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.35, color: 0x000000 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: SOMBRA_OPACIDADE, color: 0x000000 }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 ground.visible = false;
@@ -1307,7 +1314,10 @@ async function generate() {
       const colorWriteAntes = materiais.map((m) => m.colorWrite);
       materiais.forEach((m) => { m.colorWrite = false; });
       const groundAntes = ground.visible;
+      const opacidadeAntes = ground.material.opacity;
       ground.visible = true;
+      // Opaca: a camada separada é um sprite que a engine compõe e modula.
+      ground.material.opacity = 1;
       sheetRenderer.setClearColor(0x000000, 0);   // a camada é sempre transparente
       let doneShadow = 0;
       for (const pose of poses) {
@@ -1324,6 +1334,7 @@ async function generate() {
         await yieldToBrowser();
       }
       materiais.forEach((m, i) => { m.colorWrite = colorWriteAntes[i]; });
+      ground.material.opacity = opacidadeAntes;
       ground.visible = groundAntes;
       applyBackground(background);
       if (state.cancelled) throw new CancelledError();
@@ -1687,7 +1698,11 @@ function composeSheetWithShadow(r) {
   c.width = r.layout.w;
   c.height = r.layout.h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
+  // A camada separada é preta opaca; aqui ela volta a 35% para a composta ficar
+  // igual ao que o preview e a folha comum mostram.
+  ctx.globalAlpha = SOMBRA_OPACIDADE;
   ctx.drawImage(r.shadowSheet, 0, 0);
+  ctx.globalAlpha = 1;
   ctx.drawImage(r.sheet, 0, 0);
   return c;
 }
