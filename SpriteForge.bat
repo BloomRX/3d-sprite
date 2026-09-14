@@ -4,6 +4,15 @@ cd /d "%~dp0"
 set "PYTHONUTF8=1"
 chcp 65001 >nul 2>nul
 
+rem Por padrao abre em JANELA PROPRIA (sem abas nem barra de endereco), usando o
+rem Edge ou o Chrome que ja existem no Windows -- nao instala nada novo.
+rem Passe --navegador para abrir numa aba comum:  SpriteForge.bat --navegador
+set "MODO=--app"
+if /I "%~1"=="--navegador" (
+    set "MODO="
+    shift
+)
+
 if not exist "%~dp0spriteforge\serve.py" (
     echo ERRO: spriteforge\serve.py nao encontrado ao lado do SpriteForge.bat.
     set "RC=1"
@@ -29,12 +38,12 @@ set "RC=1"
 goto :finish
 
 :use_py
-py -3 "%~dp0spriteforge\serve.py" %*
+py -3 "%~dp0spriteforge\serve.py" %MODO% %*
 set "RC=%ERRORLEVEL%"
 goto :finish
 
 :use_python
-python "%~dp0spriteforge\serve.py" %*
+python "%~dp0spriteforge\serve.py" %MODO% %*
 set "RC=%ERRORLEVEL%"
 
 :finish

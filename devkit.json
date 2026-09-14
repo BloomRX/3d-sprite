@@ -12,6 +12,10 @@
       "tools/test_creation.py"
     ],
     [
+      "python3",
+      "tools/test_serve.py"
+    ],
+    [
       "node",
       "--import",
       "./tests/spriteforge/register-three.mjs",

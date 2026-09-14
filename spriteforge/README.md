@@ -14,9 +14,14 @@ de iframe sem rede.
 > responde. Se isso acontecer, um aviso amarelo aparece no topo explicando.
 
 **Windows** — duplo clique em **`SpriteForge.bat`** (raiz do repositório). Ele acha o
-Python, escolhe uma porta livre a partir de 8080, sobe o servidor e abre o navegador.
+Python, escolhe uma porta livre a partir de 8080, sobe o servidor e abre uma **janela
+própria** do app: sem abas, sem barra de endereço, sem extensões — parece um programa
+instalado. Nada é instalado para isso: usa o Edge (que já vem no Windows 11) ou o
+Chrome, com `--app=`.
 
-**Linux / macOS** — `./SpriteForge.sh`
+Quer numa aba comum? `SpriteForge.bat --navegador`.
+
+**Linux / macOS** — `./SpriteForge.sh` (mesmo comportamento; `--navegador` também vale)
 
 **Manual (qualquer SO):**
 
@@ -26,8 +31,9 @@ python3 spriteforge/serve.py                           # qualquer SO (porta livr
 python3 -m http.server 8080 --bind 0.0.0.0 --directory spriteforge/app
 ```
 
-Depois acesse <http://localhost:8080/>. `serve.py` aceita `--porta`, `--host` e
-`--sem-navegador`.
+Depois acesse <http://localhost:8080/>. `serve.py` aceita `--porta`, `--host`,
+`--sem-navegador`, `--app` (janela própria) e `--perfil` (pasta do perfil dessa janela,
+padrão `.perfil-app/`, que está no `.gitignore`).
 
 ## Estrutura
 
