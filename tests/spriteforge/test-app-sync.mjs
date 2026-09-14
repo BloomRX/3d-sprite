@@ -135,9 +135,27 @@ if (!opcoesSrc.includes("alphaCut: modo === 'pontilhado'")) {
   o = rodar('transparent', 'pontilhado');
   ok(o.sombra.pontilhado === true && o.sombra.alphaCut === 128, 'sombra pontilhada usa Bayer com corte 128');
   ok(o.personagem.rotulo.includes('personagem') && o.sombra.rotulo.includes('sombra'), 'cada conjunto tem legenda própria');
+  ok(o.personagem.comSombra === true, 'o GIF do personagem recompõe a sombra por baixo (as opções de fundo continuam valendo)');
+  ok(o.sombra.comSombra === false, 'o GIF da sombra não se recompõe em si mesmo');
 }
 
-const total = 23;
+
+/* ---- a sombra não pode existir nas duas folhas ao mesmo tempo ---- */
+const linhaGround = src.split('\n').find((l) => l.includes('ground.visible = wantShadowLayer'));
+ok(!!linhaGround, 'o passe do personagem decide o chão olhando a camada separada');
+if (linhaGround) {
+  const expr = linhaGround.trim().replace(/^ground\.visible = /, '').replace(/;$/, '');
+  const rodar = (camada, sombra) => new Function('wantShadowLayer', 'el', `return (${expr});`)(
+    camada, { chkShadow: { checked: sombra } }
+  );
+  ok(rodar(true, true) === false,
+    'camada separada ligada -> chão FORA do passe do personagem (era isso que duplicava a sombra)');
+  ok(rodar(false, true) === true, 'sem camada separada -> a sombra continua gravada no personagem');
+  ok(rodar(false, false) === false, 'sombra desligada -> chão fora');
+  ok(rodar(true, false) === false, 'camada separada com a sombra desligada -> chão fora');
+}
+
+const total = 29;
 console.log(fail === 0
   ? `\n${total} passou, 0 falhou — sync slider/campo digitado do app.js`
   : `\n${total - fail} passou, ${fail} falhou`);

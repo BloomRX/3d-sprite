@@ -968,7 +968,10 @@ async function generate() {
     const sctx = sheet.getContext('2d', { willReadFrequently: true });
     sheetRenderer.setSize(renderSize, renderSize, false);
     applyBackground(background);
-    ground.visible = el.chkShadow.checked;
+    // Com a camada separada ligada, o chão sai deste passe: a sombra vive SÓ na
+    // folha da sombra. Senão ela ficava gravada nas duas — o toggle do player só
+    // a escurecia e o sprite do personagem continuava com a sombra cinza.
+    ground.visible = wantShadowLayer ? false : el.chkShadow.checked;
 
     const camera = core.createOrthoCamera({ half, center: fit.center, elevationDeg: elevation });
     core.applyPivotOffset(camera, { cx: frame.cx, cy: frame.cy, half });
@@ -1245,6 +1248,7 @@ function opcoesGif() {
       transparente: bg === 'transparent' || bg === 'dither',
       pontilhado: bg === 'dither',
       alphaCut: core.GIF_ALPHA_CUT,
+      comSombra: true,
       fundo: GIF_BG[bg] || '#ffffff',
       rotulo: `GIFs do personagem — dir00…dir${String(state.result ? state.result.dirCount - 1 : 7).padStart(2, '0')}`
     },
@@ -1255,6 +1259,7 @@ function opcoesGif() {
       // dá para usar em jogo — no motor você escolhe a transparência (modulate /
       // self_modulate), coisa que o GIF, com alpha de 1 bit, não consegue guardar.
       alphaCut: modo === 'pontilhado' ? core.GIF_ALPHA_CUT : 8,
+      comSombra: false,
       fundo: null,
       rotulo: 'GIFs da sombra — sprite à parte, desenhe antes do personagem'
     }
@@ -1262,8 +1267,10 @@ function opcoesGif() {
 }
 
 /** Codifica um GIF por direção a partir de qualquer folha na mesma grade
- *  (a do personagem ou a da sombra — as duas têm célula, linhas e colunas iguais). */
-async function buildGifs(r, source, delay, opcao) {
+ *  (a do personagem ou a da sombra — as duas têm célula, linhas e colunas iguais).
+ *  `sombraSource` recompõe a sombra por baixo do personagem: com a camada separada
+ *  a folha do personagem vem limpa, e o GIF ainda pode sair com sombra. */
+async function buildGifs(r, source, delay, opcao, sombraSource = null) {
   const scale = Number(el.rngGifScale.value) || 1;
   const cell = r.layout.cell;
   const size = Math.max(1, Math.round(cell * scale));
@@ -1285,6 +1292,9 @@ async function buildGifs(r, source, delay, opcao) {
       if (!opcao.transparente) {
         tctx.fillStyle = opcao.fundo || '#ffffff';
         tctx.fillRect(0, 0, size, size);
+      }
+      if (sombraSource && opcao.comSombra) {
+        tctx.drawImage(sombraSource, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
       }
       tctx.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
       frames.push(tctx.getImageData(0, 0, size, size).data);
@@ -1389,7 +1399,7 @@ async function downloadZip() {
     setProgress(0.35, 'codificando os GIFs…');
     const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
     const opcoes = opcoesGif();
-    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem);
+    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem, r.shadowSheet);
     for (const g of gifs) files[`gif/${base}_dir${String(g.dir).padStart(2, '0')}.gif`] = g.bytes;
     if (r.shadowSheet) {
       setProgress(0.6, 'codificando os GIFs da sombra…');
@@ -1422,7 +1432,7 @@ async function generateGifs() {
   state.gifUrls.clear();
   showProgress(true);
   try {
-    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem);
+    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem, r.shadowSheet);
     montarGifs(gifs, '', opcoes.personagem.rotulo);
     let extra = '';
     if (r.shadowSheet) {
