@@ -217,6 +217,16 @@
     </fieldset>
 
     <fieldset>
+      <legend>Projeto</legend>
+      <div class="row wrap">
+        <button class="mini" id="btnSaveProject" title="Salva todas as opções num arquivo .spriteforge.json">Salvar projeto</button>
+        <button class="mini" id="btnOpenProject" title="Carrega as opções de um .spriteforge.json">Abrir projeto</button>
+        <input type="file" id="projectInput" accept=".json,.spriteforge.json,application/json" hidden>
+      </div>
+      <div class="hint">Só as opções são salvas — o modelo não vai junto. Salve na pasta <code>projetos/</code> do app; ela está no <code>.gitignore</code>.</div>
+    </fieldset>
+
+    <fieldset>
       <legend>Animação</legend>
       <div class="row"><label for="clipSelect">Clip</label><select id="clipSelect"><option value="-1">— sem animação —</option></select></div>
       <div class="row tight">

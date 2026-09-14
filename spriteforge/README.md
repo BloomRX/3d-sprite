@@ -81,6 +81,11 @@ A página tem **duas abas**: **3D** (viewport + painel) e **Sheet + Player** (re
 A barra de progresso fica na barra de abas, então dá para acompanhar a geração sem perder
 o resultado de vista.
 
+No canto direito do topo fica o seletor **Idioma / Language**: 🇧🇷 Português (padrão) ou
+🇺🇸 English. A escolha vale para o navegador inteiro e fica salva — quem usa em português
+não leva susto, e dá para mandar o link para alguém que só lê inglês. A interface toda
+traduz na hora, inclusive as mensagens de status e de progresso.
+
 1. **Escolha uma predefinição** (opcional, mas é o caminho mais rápido):
    **Padrão**, **Personagem 2D**, **Isométrico** ou **Itens / props**. Cada uma ajusta
    elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar. **Padrão** é o
@@ -215,6 +220,31 @@ transparência não caberiam nele de qualquer jeito; preto sólido é o formato 
 transparência você escolhe no motor (`self_modulate = Color(1,1,1,0.35)` no Godot, cor com
 alpha no Unity) e ainda pode mudar de cor, esmaecer no pulo, etc. A opção **pontilhada**
 mantém a aparência de 35 % via Bayer 4×4, mas aí a transparência fica queimada na imagem.
+
+## Salvando um projeto
+
+O painel inteiro pode virar um arquivo **`.spriteforge.json`** (botões **Salvar projeto**
+/ **Abrir projeto**, no bloco *Projeto*). Salve na pasta **`projetos/`** do repositório:
+ela existe para isso e está no `.gitignore`, então nenhum projeto seu entra num commit
+por engano — só o `LEIA-ME.txt` dela é versionado.
+
+O que vai no arquivo:
+
+| Campo | Conteúdo |
+| --- | --- |
+| `kind`, `version` | `spriteforge.project`, `1` |
+| `settings` | as 31 opções do painel |
+| `modelo` | `{ nome, formato }` — a **identidade**, não o arquivo |
+| `criadoEm` | data ISO |
+
+**O modelo não vai junto.** Um `.glb` de 40 MB dentro de um `.json` seria ilegível, e o
+caminho `C:\Users\...` de quem salvou não existe na máquina de quem abre. Por isso o
+projeto lembra o *nome* do modelo e avisa na hora de abrir: *"projeto feito com fox.glb —
+carregue o modelo de novo"*.
+
+Leitura tolerante: JSON corrompido, arquivo que não é projeto, valor de tipo errado ou
+projeto de versão futura nunca derrubam a interface — o que não presta cai no padrão, o
+que falta vem de `DEFAULT_SETTINGS`, e a barra de status diz o que foi ignorado.
 
 ## Receitas de engine
 
@@ -460,6 +490,27 @@ func _ready() -> void:
     idioma de interface não é dado da sheet, e um amigo usando o mesmo arquivo não deveria
     herdar o idioma de quem o gerou.
 
+41. **"Executável" = janela própria do navegador, não Electron.** Pediram um `.exe` que
+    rode fora do navegador. Electron/Tauri/NW.js dariam isso, mas custariam 100–200 MB,
+    uma toolchain e um passo de build — exatamente o que este projeto não tem (zero
+    `npm install`, zero build). O `--app=URL` do Chromium dá a mesma janela: sem abas,
+    sem barra de endereço, sem extensões, com ícone próprio na barra de tarefas. O motor
+    de render é o mesmo que já existia, então **nada no app mudou**. A flag vive no
+    `serve.py` (é ele quem descobre a porta) e não no `.bat`, e usa um
+    `--user-data-dir` próprio: sem isso, se o navegador já estiver aberto, o Chromium
+    ignora o `--app` e joga o app numa aba do perfil em uso.
+42. **O projeto salva opções, não o modelo.** O `.spriteforge.json` carrega as 31
+    opções e a *identidade* do modelo (`nome` + `formato`). Embutir o `.glb` como base64
+    daria um arquivo ilegível de dezenas de MB, e um caminho absoluto não sobrevive a
+    outra máquina. Em troca, abrir um projeto diz qual modelo ele espera. A leitura é
+    tolerante por design: `parseProject` nunca lança, descarta valor de tipo errado,
+    preenche o que falta dos defaults e reporta o que ignorou — arquivo de usuário é
+    entrada não-confiável.
+43. **`projetos/` no `.gitignore`, com o `LEIA-ME` versionado.** `projetos/*` +
+    `!projetos/LEIA-ME.txt`: a pasta existe no clone (senão o usuário não sabe onde
+    salvar) e o conteúdo dele nunca entra num commit. O perfil da janela de app
+    (`.perfil-app/`) também é ignorado — é cache regenerável, específico da máquina.
+
 ## Testes
 
 O spec define o teste como o checklist de navegador:
@@ -492,7 +543,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**254 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**281 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

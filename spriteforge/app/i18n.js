@@ -252,6 +252,28 @@ const EN = {
   'fps': 'fps',
   'zoom': 'zoom',
   'y': 'y',
+
+  /* ---- projeto (.spriteforge.json) ---- */
+  'Projeto': 'Project',
+  'Salvar projeto': 'Save project',
+  'Abrir projeto': 'Open project',
+  'Salva todas as opções num arquivo .spriteforge.json': 'Saves every option to a .spriteforge.json file',
+  'Carrega as opções de um .spriteforge.json': 'Loads the options from a .spriteforge.json',
+  'Só as opções são salvas — o modelo não vai junto. Salve na pasta projetos/ do app; ela está no .gitignore.':
+    'Only the options are saved — the model does not go with it. Save into the app\'s projetos/ folder; it is gitignored.',
+  'projeto salvo em {nome}': 'project saved to {nome}',
+  'projeto baixado como {nome} — mova para a pasta projetos/ se quiser':
+    'project downloaded as {nome} — move it into the projetos/ folder if you like',
+  'projeto carregado': 'project loaded',
+  'não é um projeto do SpriteForge: {motivo}': 'not a SpriteForge project: {motivo}',
+  'não consegui ler o arquivo: {msg}': "couldn't read the file: {msg}",
+  'projeto feito com {nome} — carregue o modelo de novo': 'project made with {nome} — load the model again',
+  'ignorei {n} valor(es) inválido(s): {lista}': 'ignored {n} invalid value(s): {lista}',
+  'não é um JSON válido': 'not valid JSON',
+  'o arquivo não contém um objeto de projeto': 'the file does not contain a project object',
+  'não parece um projeto do SpriteForge (falta "kind" e "settings")':
+    'does not look like a SpriteForge project (missing "kind" and "settings")',
+  'o campo "settings" não é um objeto': 'the "settings" field is not an object',
 };
 
 let atual = 'pt-BR';

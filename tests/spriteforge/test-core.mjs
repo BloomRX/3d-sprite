@@ -612,5 +612,55 @@ ok(visiveis.size >= 100, `a cobertura varre o HTML inteiro (${visiveis.size} tex
 ok(i18n.temTraducao('🇧🇷 Português'), 'o rótulo do próprio seletor tem entrada (fica igual de propósito)');
 ok(i18n.t('🇧🇷 Português') === '🇧🇷 Português', 'o seletor de idioma não traduz o próprio nome do idioma');
 
+/* ---------------- projeto salvo (.spriteforge.json) ---------------- */
+const proj = core.buildProject({ ...core.DEFAULT_SETTINGS, cell: 256, directions: 4 },
+  { nome: 'fox.glb', formato: 'glb' });
+ok(proj.kind === core.PROJECT_KIND, 'projeto carrega o kind do SpriteForge');
+ok(proj.version === core.PROJECT_VERSION, 'projeto carrega a versão do formato');
+ok(proj.settings.cell === 256 && proj.settings.directions === 4, 'guarda o que o usuário mudou');
+ok(proj.modelo.nome === 'fox.glb' && proj.modelo.formato === 'glb', 'lembra a identidade do modelo (não o arquivo)');
+ok(Object.keys(proj.settings).length === Object.keys(core.DEFAULT_SETTINGS).length,
+  'todas as chaves de settings vão junto — nenhuma opção fica de fora');
+ok(!('kind' in proj.settings) && !('version' in proj.settings), 'settings não vaza metadado do envelope');
+const volta = core.parseProject(JSON.stringify(proj));
+ok(volta.ok && volta.projeto.settings.cell === 256, 'ida e volta preserva cell');
+ok(volta.ok && volta.projeto.modelo.nome === 'fox.glb', 'ida e volta preserva o modelo');
+ok(volta.ok && JSON.stringify(volta.projeto.settings) === JSON.stringify(proj.settings),
+  'ida e volta preserva o objeto de settings inteiro');
+ok(core.buildProject(core.DEFAULT_SETTINGS).modelo === null, 'sem modelo carregado o campo vem nulo');
+// Arquivos corrompidos não podem derrubar a interface.
+for (const ruim of ['{invalido', '', 'null', '[]', '"texto"', '{"a":1}',
+  JSON.stringify({ kind: core.PROJECT_KIND, settings: 'x' })]) {
+  const r = core.parseProject(ruim);
+  ok(r.ok === false && typeof r.erro === 'string' && r.erro.length > 0,
+    `arquivo inválido rejeitado com mensagem: ${JSON.stringify(ruim).slice(0, 40)}`);
+}
+// Versão futura: o que esta versão não conhece é ignorado, o que falta vem do default.
+const futuro = core.buildProject(core.DEFAULT_SETTINGS);
+futuro.version = 99;
+futuro.settings.opcaoDoFuturo = 'x';
+delete futuro.settings.cell;
+const rf = core.parseProject(JSON.stringify(futuro));
+ok(rf.ok && rf.projeto.version === 99, 'projeto de versão futura é aceito');
+ok(rf.projeto.settings.cell === core.DEFAULT_SETTINGS.cell, 'chave ausente volta do default');
+ok(!('opcaoDoFuturo' in rf.projeto.settings), 'chave desconhecida não entra no painel');
+// Tipos errados caem no default em vez de corromper os controles.
+const torto = core.buildProject(core.DEFAULT_SETTINGS);
+torto.settings.cell = 'abc';
+torto.settings.shadow = 'sim';
+torto.settings.pivot = 123;
+torto.settings.frames = null;
+const rt = core.parseProject(JSON.stringify(torto));
+ok(rt.ok && rt.projeto.settings.cell === core.DEFAULT_SETTINGS.cell, 'número não-numérico cai no default');
+ok(rt.projeto.settings.shadow === core.DEFAULT_SETTINGS.shadow, 'booleano não-booleano cai no default');
+ok(rt.projeto.settings.pivot === core.DEFAULT_SETTINGS.pivot, 'string não-string cai no default');
+ok(rt.projeto.settings.frames === core.DEFAULT_SETTINGS.frames, 'null cai no default');
+ok(rt.ignoradas.length === 3, 'os 3 valores ruins são reportados para a UI avisar');
+// O formato que o localStorage já usava continua abrindo.
+ok(core.parseProject(JSON.stringify({ preset: 'iso', settings: { cell: 128 } })).ok,
+  'exportação antiga do localStorage ainda abre');
+ok(core.parseProject(JSON.stringify(proj)).projeto.settings.directions === 4,
+  'valor fora do default sobrevive (não é só "voltou pro padrão")');
+
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

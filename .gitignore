@@ -20,3 +20,12 @@ node_modules/
 # Saídas geradas pelo app ao testar (sheets, zips, GIFs baixados)
 *.aseprite.json.tmp
 spriteforge-out/
+
+# Projetos salvos pelo usuário — conteúdo dele, nunca do repositório.
+# O LEIA-ME fica versionado para a pasta existir no clone.
+projetos/*
+!projetos/LEIA-ME.txt
+
+# Perfil da janela de app (--app): cache, cookies e preferências do navegador
+# embutido. Regenerável, específico da máquina.
+.perfil-app/

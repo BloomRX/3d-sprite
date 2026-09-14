@@ -888,3 +888,100 @@ export function disposeHierarchy(root) {
   });
   return stats;
 }
+
+/* ================================================================== *
+ * Projeto salvo (.spriteforge.json)
+ * ================================================================== *
+ * Guarda só o que é reprodução: as opções do painel e a identidade do modelo.
+ * NÃO guarda o modelo em si — um .glb de 40 MB dentro de um .json seria
+ * ilegível e inútil, e o caminho absoluto de quem salvou não existe na máquina
+ * de quem abre. Por isso o projeto lembra o NOME do modelo e avisa.
+ */
+
+export const PROJECT_KIND = 'spriteforge.project';
+export const PROJECT_VERSION = 1;
+
+/** Chaves que o projeto pode carregar — qualquer outra é descartada na leitura. */
+const CHAVES_SETTINGS = Object.keys(DEFAULT_SETTINGS);
+
+/**
+ * Monta o objeto de projeto.
+ * @param {object} settings - o painel atual (mesma forma de DEFAULT_SETTINGS)
+ * @param {{nome?:string, formato?:string}} [modelo] - identidade do modelo carregado
+ */
+export function buildProject(settings, modelo = null) {
+  const limpo = {};
+  for (const chave of CHAVES_SETTINGS) {
+    if (settings && chave in settings) limpo[chave] = settings[chave];
+  }
+  return {
+    kind: PROJECT_KIND,
+    version: PROJECT_VERSION,
+    tool: 'SpriteForge Web',
+    criadoEm: new Date().toISOString(),
+    modelo: modelo && modelo.nome
+      ? { nome: String(modelo.nome), formato: modelo.formato ? String(modelo.formato) : null }
+      : null,
+    settings: limpo
+  };
+}
+
+/**
+ * Valida e normaliza um projeto lido do disco.
+ * Nunca lança: devolve `{ ok, projeto?, erro? }` para a UI mostrar a mensagem.
+ * Um projeto de versão futura é aceito — as chaves que esta versão não conhece
+ * são simplesmente ignoradas, e as que faltam vêm de DEFAULT_SETTINGS.
+ */
+export function parseProject(texto) {
+  let dados;
+  try {
+    dados = JSON.parse(texto);
+  } catch {
+    return { ok: false, erro: 'não é um JSON válido' };
+  }
+  if (!dados || typeof dados !== 'object' || Array.isArray(dados)) {
+    return { ok: false, erro: 'o arquivo não contém um objeto de projeto' };
+  }
+  // Tolera também o formato das preferências do localStorage, que já guarda
+  // { preset, settings }: quem exportou aquilo consegue importar aqui.
+  if (dados.kind !== PROJECT_KIND && !dados.settings) {
+    return { ok: false, erro: 'não parece um projeto do SpriteForge (falta "kind" e "settings")' };
+  }
+  if (typeof dados.settings !== 'object' || dados.settings === null || Array.isArray(dados.settings)) {
+    return { ok: false, erro: 'o campo "settings" não é um objeto' };
+  }
+  const settings = { ...DEFAULT_SETTINGS };
+  const ignoradas = [];
+  for (const chave of CHAVES_SETTINGS) {
+    if (!(chave in dados.settings)) continue;
+    const valor = dados.settings[chave];
+    if (valor === null || valor === undefined) continue;
+    const padrao = DEFAULT_SETTINGS[chave];
+    if (typeof padrao === 'number' && !Number.isFinite(Number(valor))) {
+      ignoradas.push(chave);
+      continue;
+    }
+    if (typeof padrao === 'boolean' && typeof valor !== 'boolean') {
+      ignoradas.push(chave);
+      continue;
+    }
+    if (typeof padrao === 'string' && typeof valor !== 'string') {
+      ignoradas.push(chave);
+      continue;
+    }
+    settings[chave] = typeof padrao === 'number' ? Number(valor) : valor;
+  }
+  const modelo = dados.modelo && typeof dados.modelo === 'object' && dados.modelo.nome
+    ? { nome: String(dados.modelo.nome), formato: dados.modelo.formato ? String(dados.modelo.formato) : null }
+    : null;
+  return {
+    ok: true,
+    projeto: {
+      version: Number.isFinite(Number(dados.version)) ? Number(dados.version) : 0,
+      criadoEm: typeof dados.criadoEm === 'string' ? dados.criadoEm : null,
+      modelo,
+      settings
+    },
+    ignoradas
+  };
+}

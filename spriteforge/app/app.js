@@ -20,6 +20,7 @@ const $ = (id) => document.getElementById(id);
 const el = {
   fileInput: $('fileInput'), btnOpen: $('btnOpen'), btnSample: $('btnSample'), modelInfo: $('modelInfo'),
   btnSampleStatic: $('btnSampleStatic'),
+  btnSaveProject: $('btnSaveProject'), btnOpenProject: $('btnOpenProject'), projectInput: $('projectInput'),
   btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
   tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
@@ -697,6 +698,71 @@ try {
 el.btnReframe.addEventListener('click', () => {
   framePreview();
   setStatus('câmera reenquadrada no modelo', 'ok');
+});
+
+/* ---- projeto (.spriteforge.json) ----
+ * Salva só as opções: o modelo não vai junto (um .glb de 40 MB dentro de um
+ * .json seria ilegível, e o caminho de quem salvou não existe em outra máquina).
+ * Por isso o projeto lembra o NOME do modelo e avisa na hora de abrir. */
+async function salvarProjeto() {
+  const projeto = core.buildProject(
+    readSettings(),
+    state.name ? { nome: state.name, formato: core.formatOf(state.name) } : null
+  );
+  const texto = JSON.stringify(projeto, null, 2);
+  const base = state.name ? state.name.replace(/\.[^.]+$/, '') : 'spriteforge';
+  const sugerido = `${base}.spriteforge.json`;
+  // File System Access API (Chrome/Edge, incluindo o modo app): grava direto na
+  // pasta que o usuário escolher — a projetos/ do app, por exemplo. Sem ela
+  // (Firefox/Safari) cai no download comum, que também resolve.
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: sugerido,
+        types: [{ description: 'Projeto do SpriteForge', accept: { 'application/json': ['.spriteforge.json', '.json'] } }]
+      });
+      const gravador = await handle.createWritable();
+      await gravador.write(texto);
+      await gravador.close();
+      setStatus(t('projeto salvo em {nome}', { nome: handle.name || sugerido }), 'ok');
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;   // o usuário cancelou: não é erro
+      // Outro motivo (pasta sem permissão, política do navegador): não perde o
+      // trabalho, cai no download.
+    }
+  }
+  downloadBlob(new Blob([texto], { type: 'application/json' }), sugerido);
+  setStatus(t('projeto baixado como {nome} — mova para a pasta projetos/ se quiser', { nome: sugerido }), 'ok');
+}
+
+async function abrirProjeto(arquivo) {
+  let r;
+  try {
+    r = core.parseProject(await arquivo.text());
+  } catch (err) {
+    setStatus(t('não consegui ler o arquivo: {msg}', { msg: err.message }), 'err');
+    return;
+  }
+  if (!r.ok) {
+    setStatus(t('não é um projeto do SpriteForge: {motivo}', { motivo: r.erro }), 'err');
+    return;
+  }
+  applySettings(r.projeto.settings);
+  markPreset(null);          // o painel agora não corresponde a nenhum preset
+  saveSettings(null);
+  const avisos = [];
+  if (r.projeto.modelo) avisos.push(t('projeto feito com {nome} — carregue o modelo de novo', { nome: r.projeto.modelo.nome }));
+  if (r.ignoradas.length) avisos.push(t('ignorei {n} valor(es) inválido(s): {lista}', { n: r.ignoradas.length, lista: r.ignoradas.join(', ') }));
+  setStatus(avisos.length ? avisos.join(' · ') : t('projeto carregado'), 'ok');
+}
+
+el.btnSaveProject.addEventListener('click', () => { salvarProjeto(); });
+el.btnOpenProject.addEventListener('click', () => el.projectInput.click());
+el.projectInput.addEventListener('change', () => {
+  const arquivo = el.projectInput.files?.[0];
+  el.projectInput.value = '';       // permite reabrir o mesmo arquivo
+  if (arquivo) abrirProjeto(arquivo);
 });
 
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
