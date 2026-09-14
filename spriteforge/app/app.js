@@ -538,39 +538,29 @@ function markPreset(name) {
 /** Escreve um objeto de configurações em todos os controles do painel. */
 function applySettings(s) {
   el.selDirections.value = String(s.directions);
-  el.rngFrames.value = String(s.frames);
-  el.framesVal.value = String(s.frames);
-  el.rngElevation.value = String(s.elevation);
-  el.elevationVal.value = String(s.elevation);
-  el.rngAzimuth.value = String(s.azimuthOffset);
-  el.azimuthVal.value = String(s.azimuthOffset);
+  setPair('rngFrames', 'framesVal', s.frames);
+  setPair('rngElevation', 'elevationVal', s.elevation);
+  setPair('rngAzimuth', 'azimuthVal', s.azimuthOffset);
   el.selPivot.value = s.pivot;
-  el.rngCell.value = String(s.cell);
-  el.cellVal.value = String(s.cell);
-  el.rngPadding.value = String(s.padding);
-  el.paddingVal.value = String(s.padding);
+  setPair('rngCell', 'cellVal', s.cell);
+  setPair('rngPadding', 'paddingVal', s.padding);
   el.chkSsaa.checked = !!s.ssaa;
   el.chkLockScale.checked = !!s.lockScale;
-  el.rngScaleLock.value = String(s.pxPerUnit);
-  el.scaleLockVal.value = String(s.pxPerUnit);
+  setPair('rngScaleLock', 'scaleLockVal', s.pxPerUnit);
   el.rowScaleLock.hidden = !s.lockScale;
   el.chkTurntable.checked = !!s.turntable;
   el.selBackground.value = s.background;
   el.chkShadow.checked = !!s.shadow;
   el.chkLoopPerfect.checked = !!s.loopPerfect;
-  el.rngFps.value = String(s.fps);
-  el.fpsVal.value = String(s.fps);
-  el.rngZoom.value = String(s.zoom);
-  el.zoomVal.value = String(s.zoom);
+  setPair('rngFps', 'fpsVal', s.fps);
+  setPair('rngZoom', 'zoomVal', s.zoom);
   el.rngGifScale.value = String(s.gifScale);
   el.selGifBg.value = s.gifBg;
   el.chkShadowLayer.checked = !!s.shadowLayer;
   el.chkPlayerShadow.checked = !!s.playerShadow;
   el.chkLightCamera.checked = !!s.lightCamera;
-  el.rngLightAz.value = String(s.lightAz);
-  el.lightAzVal.value = String(s.lightAz);
-  el.rngLightInt.value = String(s.lightIntensity);
-  el.lightIntVal.value = String(s.lightIntensity);
+  setPair('rngLightAz', 'lightAzVal', s.lightAz);
+  setPair('rngLightInt', 'lightIntVal', s.lightIntensity);
   ground.visible = !!s.shadow;
   applyLightRig();
   framePreview();
@@ -685,20 +675,59 @@ const NUMERIC_PAIRS = [
   ['rngCell', 'cellVal'], ['rngPadding', 'paddingVal'], ['rngScaleLock', 'scaleLockVal'],
   ['rngFps', 'fpsVal'], ['rngZoom', 'zoomVal'], ['rngLightAz', 'lightAzVal'], ['rngLightInt', 'lightIntVal']
 ];
+// Ângulos são periódicos: passar de 359° não significa nada, então esses continuam
+// clampados nas duas pontas. As demais grandezas são livres — quem quiser célula
+// 1024×1024 digita 1024, e o slider amplia o próprio teto para acompanhar.
+const ANGULOS = new Set(['elevationVal', 'azimuthVal', 'lightAzVal']);
+
+// Escreve um par (slider + campo) sem perder valores acima do teto de fábrica.
+function setPair(rangeKey, numKey, value) {
+  const range = el[rangeKey];
+  const num = el[numKey];
+  if (!range || !num) return;
+  const baseMax = Number(range.dataset.baseMax ?? range.max);
+  const baseStep = range.dataset.baseStep ?? range.step ?? '1';
+  if (!ANGULOS.has(numKey) && Number(value) > baseMax) {
+    range.max = String(value);
+    range.step = 'any';          // para o slider não arredondar o valor digitado
+  } else {
+    range.max = String(baseMax);
+    range.step = baseStep;
+  }
+  range.value = String(value);
+  num.value = String(value);
+}
+
 for (const [rangeKey, numKey] of NUMERIC_PAIRS) {
   const range = el[rangeKey];
   const num = el[numKey];
   if (!range || !num) continue;
-  range.addEventListener('input', () => { num.value = range.value; });
+  range.dataset.baseMax = range.max;               // teto "de fábrica" do slider
+  range.dataset.baseStep = range.step ?? '1';
+  const baseMax = Number(range.max);
+  const baseStep = range.dataset.baseStep;
+  const livre = !ANGULOS.has(numKey);
+  let digitando = false;
+  range.addEventListener('input', () => { if (!digitando) num.value = range.value; });
+  // soltou o slider: o teto volta ao normal
+  range.addEventListener('change', () => { range.max = String(baseMax); range.step = baseStep; });
   const commit = (rewrite) => {
     if (num.value === '') return;
+    const raw = Number(num.value);
+    if (!Number.isFinite(raw)) return;
     const min = Number(range.min);
+    // digitar acima do topo AMPLIA o slider, porque é o slider que o gerador lê:
+    // sem isso o 1024 digitado viraria 512 na hora de renderizar
+    const acima = livre && raw > baseMax;
+    range.max = String(acima ? raw : baseMax);
+    range.step = acima ? 'any' : baseStep;
     const max = Number(range.max);
-    const v = Math.min(max, Math.max(min, Number(num.value)));
-    if (!Number.isFinite(v)) return;
+    const v = Math.min(max, Math.max(min, raw));
+    digitando = true;                              // senão o listener de cima reescreve o campo
     range.value = String(v);
-    if (rewrite) num.value = String(v);   // devolve o valor clampado ao sair do campo
     range.dispatchEvent(new Event('input'));
+    digitando = false;
+    if (rewrite) num.value = String(v);            // ao sair do campo, mostra o que valeu
   };
   num.addEventListener('input', () => commit(false));
   num.addEventListener('change', () => commit(true));
@@ -1038,7 +1067,7 @@ async function generate() {
     drawPlayer();
     el.gifList.innerHTML = '';
     if (warnings.length) setStatus(warnings.join(' · '), 'err');
-    else setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)`, 'ok');
+    else setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)${shadowSheet ? ' · camada de sombra pronta no botão shadow.png' : ''}`, 'ok');
   } catch (err) {
     if (err && err.name === 'AbortError') setStatus('geração cancelada — a sheet anterior continua válida', 'err');
     else {

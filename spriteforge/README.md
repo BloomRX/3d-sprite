@@ -125,7 +125,7 @@ O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 | `<nome>_metadata.json` | schema completo, compatível com o CLI do Blender |
 | `<nome>.aseprite.json` | sidecar Aseprite: `frames` em array + `meta.frameTags` |
 | `<nome>_dirNN.gif` | um GIF animado por direção, com transparência |
-| **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas) |
+| **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas). Botão próprio, em linha separada logo abaixo do `metadata.json` — e também vai dentro do `.zip` |
 | **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
@@ -308,10 +308,24 @@ func _ready() -> void:
     de quantizar e o GIF bate com o preview; sem fundo, ela é removida em vez de virar
     mancha. `alphaMask()` existe separado do `encodeGif` justamente para isso ser testável
     sem decodificar GIF.
-23. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
+25. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
+    1024 numa célula cujo slider vai até 512. O teto não estava só no HTML: `generate()` lê
+    `el.rngCell.value` (o **slider**) em ~20 pontos, então soltar o `max` do campo sozinho não
+    mudaria nada — o valor digitado continuaria virando 512. A solução foi o campo **ampliar o
+    teto do slider** ao receber um valor acima dele (`max = valor`, `step = any` para o slider
+    não arredondar) e devolvê-lo ao normal quando o slider é arrastado. Ângulos — elevação,
+    azimute e azimute da luz — continuam clampados nas duas pontas: 200° não significa nada. O
+    mínimo continua valendo (célula 7 vira 16). `setPair()` faz o mesmo para presets e
+    `applySettings`, senão um preset salvo com 1024 era podado ao carregar. Célula grande não
+    quebra nada: `computeLayout` já reduz a célula para caber em 8192 px e avisa na barra de
+    status (1024 com 8×12 → 682 px).
+26. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
+    barra do Windows caía em cima das caixinhas de número. Agora ele reserva o vão de uma vez
+    (`scrollbar-gutter:stable`), usa barra fina e os campos têm largura fixa de 66 px.
+27. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
     clamp na faixa do slider e disparando os mesmos handlers — não há um segundo caminho
     de efeito colateral para divergir.
-24. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+28. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 
@@ -336,9 +350,18 @@ ou, direto:
 
 ```bat
 node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core.mjs
+node tests\spriteforge\test-app-sync.mjs
 ```
 
-**198 asserções**, sem `npm install`: o `three` importado é o arquivo vendido em
+`test-app-sync.mjs` (**17 asserções**) cobre a outra ponta — os campos digitados. Como não há
+como abrir um navegador aqui, ele executa o **bloco real** do `app.js`, extraído do arquivo
+pelo texto, contra um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe
+no passo). Confirma que digitar 1024 na célula chega até o slider — que é o que `generate()`
+lê —, que ângulos continuam limitados, que o mínimo continua valendo e que digitar não é
+sobrescrito no meio do número. Entra no `validate --full`; **não** está no CI, porque o
+workflow só chama o núcleo.
+
+**198 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

@@ -3,8 +3,23 @@
   "repo_description": "SpriteForge Web: spritesheet animada em 8 direções a partir de modelos 3D, rodando 100% no navegador",
   "base_branch": "main",
   "full_tests": [
-    ["python3", "tools/test_project_cli.py"],
-    ["python3", "tools/test_creation.py"],
-    ["node", "--import", "./tests/spriteforge/register-three.mjs", "tests/spriteforge/test-core.mjs"]
+    [
+      "python3",
+      "tools/test_project_cli.py"
+    ],
+    [
+      "python3",
+      "tools/test_creation.py"
+    ],
+    [
+      "node",
+      "--import",
+      "./tests/spriteforge/register-three.mjs",
+      "tests/spriteforge/test-core.mjs"
+    ],
+    [
+      "node",
+      "tests/spriteforge/test-app-sync.mjs"
+    ]
   ]
 }

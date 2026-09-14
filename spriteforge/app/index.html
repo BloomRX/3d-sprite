@@ -29,8 +29,14 @@
   /* ---------- painel de controles ---------- */
   aside{
     flex:0 0 var(--aside); overflow-y:auto; overflow-x:hidden; background:var(--panel);
-    border-right:1px solid var(--line); padding:10px;
+    border-right:1px solid var(--line); padding:10px 12px 28px 10px;
+    /* a barra de rolagem do Windows caía em cima das caixinhas de número: reserva o
+       vão de uma vez (não sobrepõe conteúdo) e usa uma barra fina */
+    scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#4a5666 #20262f;
   }
+  aside::-webkit-scrollbar{width:9px}
+  aside::-webkit-scrollbar-track{background:#20262f}
+  aside::-webkit-scrollbar-thumb{background:#4a5666; border:2px solid #20262f; border-radius:6px}
   .row{display:flex; gap:8px; align-items:center; margin:6px 0}
   /* .row tem display:flex, que ganha do [hidden] do user agent: sem esta regra o
      atributo hidden não esconderia nada. */
@@ -59,7 +65,7 @@
   select{flex:1 1 auto; min-width:0}
   input[type=range]{flex:1 1 auto; min-width:60px}
   input[type=checkbox]{accent-color:var(--acc)}
-  .val{color:var(--fg); font-variant-numeric:tabular-nums; min-width:50px; text-align:right; font-size:12px}
+  .val{color:var(--fg); font-variant-numeric:tabular-nums; flex:0 0 66px; width:66px; min-width:0; text-align:right; font-size:12px; padding:3px 4px}
 
   /* ---------- palco com abas ---------- */
   section.stage{flex:1 1 auto; display:flex; flex-direction:column; min-width:0}
@@ -220,12 +226,12 @@
           <option value="top">topo</option>
         </select>
       </div>
-      <div class="row"><label for="rngFrames">Frames</label><input type="range" id="rngFrames" min="1" max="32" step="1" value="12"><input type="number" class="val" id="framesVal" min="1" max="32" step="1" value="12" title="quadros por direção"></div>
-      <div class="row"><label for="rngCell">Célula</label><input type="range" id="rngCell" min="16" max="512" step="8" value="128"><input type="number" class="val" id="cellVal" min="16" max="512" step="8" value="128" title="pixels"></div>
-      <div class="row"><label for="rngPadding">Padding</label><input type="range" id="rngPadding" min="0" max="8" step="1" value="0"><input type="number" class="val" id="paddingVal" min="0" max="8" step="1" value="0" title="pixels de vão entre células"></div>
+      <div class="row"><label for="rngFrames">Frames</label><input type="range" id="rngFrames" min="1" max="32" step="1" value="12"><input type="number" class="val" id="framesVal" min="1" step="1" value="12" title="quadros por direção — pode digitar além de 32"></div>
+      <div class="row"><label for="rngCell">Célula</label><input type="range" id="rngCell" min="16" max="512" step="8" value="128"><input type="number" class="val" id="cellVal" min="16" step="8" value="128" title="pixels — digite o valor que quiser, o slider só vai até 512"></div>
+      <div class="row"><label for="rngPadding">Padding</label><input type="range" id="rngPadding" min="0" max="8" step="1" value="0"><input type="number" class="val" id="paddingVal" min="0" step="1" value="0" title="pixels de vão entre células"></div>
       <div class="row"><input type="checkbox" id="chkSsaa"><label for="chkSsaa">SSAA 2x (renderiza 2x e reduz)</label></div>
       <div class="row"><input type="checkbox" id="chkLockScale"><label for="chkLockScale">Escala travada (px por unidade)</label></div>
-      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="0.05" max="64" step="0.05" value="8"><input type="number" class="val" id="scaleLockVal" min="0.05" max="64" step="0.05" value="8" title="pixels por unidade de mundo"></div>
+      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="0.05" max="64" step="0.05" value="8"><input type="number" class="val" id="scaleLockVal" min="0.05" step="0.05" value="8" title="pixels por unidade de mundo"></div>
       <div class="row"><span class="hint">Trava absoluta: o mesmo modelo sai do mesmo tamanho em qualquer projeto. Ao ligar, o valor é calibrado no modelo atual para não cortar nada.</span></div>
       <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
     </fieldset>
@@ -242,7 +248,7 @@
       <div class="row"><input type="checkbox" id="chkShadow" checked><label for="chkShadow">Sombra no chão</label></div>
       <div class="row"><input type="checkbox" id="chkLightCamera"><label for="chkLightCamera">Luz presa à câmera (flat)</label></div>
       <div class="row"><label for="rngLightAz">Luz (azim.)</label><input type="range" id="rngLightAz" min="0" max="359" step="1" value="34"><input type="number" class="val" id="lightAzVal" min="0" max="359" step="1" value="34" title="graus"></div>
-      <div class="row"><label for="rngLightInt">Luz (int.)</label><input type="range" id="rngLightInt" min="0" max="5" step="0.1" value="2.6"><input type="number" class="val" id="lightIntVal" min="0" max="5" step="0.1" value="2.6" title="intensidade da luz principal"></div>
+      <div class="row"><label for="rngLightInt">Luz (int.)</label><input type="range" id="rngLightInt" min="0" max="5" step="0.1" value="2.6"><input type="number" class="val" id="lightIntVal" min="0" step="0.1" value="2.6" title="intensidade da luz principal"></div>
     </fieldset>
 
     <fieldset>
@@ -292,10 +298,16 @@
             </div>
             <div class="row wrap">
               <button id="dlSheet">sheet.png</button>
-              <button id="dlShadow">shadow.png</button>
               <button id="dlJson">metadata.json</button>
               <button id="dlAseprite">.aseprite.json</button>
             </div>
+            <div class="row">
+              <button id="dlShadow" style="flex:1" title="só a sombra do chão, na mesma grade da sheet">
+                ⬛ shadow.png — só a sombra, separada
+              </button>
+            </div>
+            <div class="hint">mesma grade da sheet: na engine, desenhe antes do sprite e esconda
+              esse nó para tirar a sombra. Também vai dentro do .zip.</div>
             <div class="hint" id="jsonInfo"></div>
           </div>
         </div>
@@ -312,8 +324,8 @@
               <label for="playerDir">direção</label>
               <select id="playerDir" style="flex:0 1 auto"></select>
             </div>
-            <div class="row tight"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><input type="number" class="val" id="fpsVal" min="1" max="60" step="1" value="12" title="quadros por segundo"></div>
-            <div class="row tight"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="1"><input type="number" class="val" id="zoomVal" min="1" max="6" step="1" value="1" title="vezes"></div>
+            <div class="row tight"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><input type="number" class="val" id="fpsVal" min="1" step="1" value="12" title="quadros por segundo"></div>
+            <div class="row tight"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="1"><input type="number" class="val" id="zoomVal" min="1" step="1" value="1" title="vezes"></div>
             <div class="hint">zoom = lupa dentro da caixa fixa (não muda o layout)</div>
           </div>
         </div>
