@@ -435,6 +435,25 @@ func _ready() -> void:
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 
+38. **Tradução por conteúdo, não por chave.** O `app/i18n.js` tem um dicionário
+    *português → inglês* e o `aplicarIdioma()` percorre a árvore do DOM trocando o texto
+    dos nós e os `title`. A alternativa — colocar `data-i18n="alguma.chave"` em cada um dos
+    ~160 textos do `index.html` — exigiria numerar manualmente tudo isso e quebraria em
+    silêncio na primeira label nova. Aqui, texto sem entrada simplesmente **fica em
+    português**: a falha é visível e inofensiva, e um teste no `test-core.mjs` varre o
+    HTML inteiro e falha se algum texto visível ficar sem entrada. Os originais ficam em
+    `WeakMap`s, então voltar para pt-BR restaura exatamente o que estava lá.
+39. **Mensagens dinâmicas passam por `t()`.** `setStatus` e `setProgress` traduzem por
+    dentro, então as ~20 mensagens fixas funcionam sem tocar nos pontos de chamada; as que
+    interpolam valores usam `t('texto {var}', { var })`. O que o app monta em tempo de
+    execução (info do modelo, info da sheet, listas de clip e direção) fica guardado como
+    função em `state`, e `redesenharTextosDinamicos()` a refaz na troca de idioma — sem
+    isso a interface ficaria meio traduzida até a próxima geração.
+40. **O idioma é do navegador, não do projeto.** Fica em
+    `localStorage['spriteforge.idioma']` e o padrão é pt-BR. Não vai no `metadata.json`:
+    idioma de interface não é dado da sheet, e um amigo usando o mesmo arquivo não deveria
+    herdar o idioma de quem o gerou.
+
 ## Testes
 
 O spec define o teste como o checklist de navegador:
@@ -467,7 +486,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**231 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**254 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

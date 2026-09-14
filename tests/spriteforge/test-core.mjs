@@ -10,6 +10,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import * as THREE from '../../spriteforge/app/vendor/three.module.js';
+import * as i18n from '../../spriteforge/app/i18n.js';
 import * as core from '../../spriteforge/app/core.js';
 
 let pass = 0, fail = 0;
@@ -553,6 +554,63 @@ approx(core.pxPerUnitToFit(128, 0), 1, 1e-12, 'half zero devolve 1 px/un em vez 
 // O número do bug reportado: 8 px/un sobre o Fox cobria 7% do modelo.
 ok(core.lockedHalf(128, 8) / 113.49 < 0.08, 'a trava antiga do preset iso cobria <8% do Fox (o bug relatado)');
 ok(core.pxPerUnitToFit(128, 113.49) < 1, 'o Fox precisa de menos de 1 px/un — por isso o slider ia de 1 a 64 e não servia');
+
+/* ---------------- i18n (tradução pt-BR <-> en) ---------------- */
+ok(Array.isArray(i18n.IDIOMAS) && i18n.IDIOMAS.length === 2, '2 idiomas disponíveis');
+ok(i18n.IDIOMAS[0].id === 'pt-BR', 'pt-BR é o primeiro idioma (o padrão)');
+ok(i18n.IDIOMAS.some((i) => i.id === 'en'), 'en está na lista');
+ok(i18n.idiomaAtual() === 'pt-BR', 'começa em pt-BR — quem já usa o app não leva susto');
+ok(i18n.t('Gerar spritesheet') === 'Gerar spritesheet', 'em pt-BR t() devolve o texto como está');
+ok(i18n.norm('  Gerar\n  sheet  ') === 'Gerar sheet', 'norm() colapsa espaços e quebras de linha');
+ok(i18n.norm('\u00a0Gerar\u00a0') === 'Gerar', 'norm() também derruba espaço não-quebrável');
+ok(i18n.t('frase que não existe no dicionário') === 'frase que não existe no dicionário',
+  'sem tradução o texto fica em português (falha suave, nunca undefined)');
+const pt = i18n.t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)',
+  { w: 1024, h: 1024, cols: 8, rows: 8, cell: 128 });
+ok(pt === 'sheet pronta: 1024×1024 (8×8 células de 128px)', 'em pt-BR as variáveis são interpoladas');
+i18n.aplicarIdioma('en');
+ok(i18n.idiomaAtual() === 'en', 'aplicarIdioma("en") troca o idioma');
+ok(i18n.t('Gerar spritesheet') === 'Generate spritesheet', 'em en traduz o botão de gerar');
+ok(i18n.t('Gerar GIFs') === 'Generate GIFs', 'em en traduz o botão de GIFs');
+ok(i18n.t('Gerar') === 'Generate', 'em en traduz o verbo isolado');
+const en = i18n.t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)',
+  { w: 1024, h: 1024, cols: 8, rows: 8, cell: 128 });
+ok(en === 'sheet ready: 1024×1024 (8×8 cells of 128px)', 'em en traduz E interpola na mesma chamada');
+ok(i18n.t('renderizando {i}/{n} — dir {d}, frame {f}', { i: 3, n: 24, d: '02', f: 7 })
+  === 'rendering 3/24 — dir 02, frame 7', 'mensagem de progresso traduzida com 4 variáveis');
+ok(i18n.t('modelo anterior liberado ({g} geometrias, {m} materiais, {tex} texturas)',
+  { g: 12, m: 4, tex: 3 }) === 'previous model released (12 geometries, 4 materials, 3 textures)',
+  'mensagem de liberação de VRAM traduzida');
+ok(i18n.t('{nome} — {n} animação(ões)', { nome: 'Fox', n: 3 }) === 'Fox — 3 animation(s)',
+  'variável que é nome de arquivo não é traduzida');
+i18n.aplicarIdioma('en-GB');
+ok(i18n.idiomaAtual() === 'pt-BR', 'idioma desconhecido cai em pt-BR em vez de quebrar');
+i18n.aplicarIdioma('en');
+i18n.aplicarIdioma('pt-BR');
+ok(i18n.idiomaAtual() === 'pt-BR' && i18n.t('Gerar') === 'Gerar', 'dá para voltar para pt-BR');
+// Todo texto visível do HTML precisa ter tradução em inglês — é isso que impede
+// a interface de voltar "meio portuguesa" depois de uma edição no index.html.
+const html = await readFile(new URL('../../spriteforge/app/index.html', import.meta.url), 'utf8');
+// O DOM decodifica entidades antes de entregar o texto ao i18n, então a
+// comparação tem que partir do texto decodificado.
+const decodificar = (t) => t
+  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+const visiveis = new Set();
+for (const m of html.matchAll(/title="([^"]{2,})"/g)) visiveis.add(i18n.norm(decodificar(m[1])));
+for (const m of html.matchAll(/<(?:label|button|option|h1|h2|h3|p|legend|summary)\b[^>]*>([^<]{2,})</g)) {
+  visiveis.add(i18n.norm(decodificar(m[1])));
+}
+const semTraducao = [...visiveis].filter((txt) => {
+  if (!txt) return false;
+  if (/^[\d\s.:,%/·—–°-]*$/.test(txt)) return false;      // só número/pontuação
+  return !i18n.temTraducao(txt);                            // não está no dicionário
+});
+ok(semTraducao.length === 0,
+  `todo texto visível do HTML tem entrada no dicionário inglês${semTraducao.length ? ' — faltando: ' + semTraducao.slice(0, 8).join(' | ') : ''}`);
+ok(visiveis.size >= 100, `a cobertura varre o HTML inteiro (${visiveis.size} textos)`);
+ok(i18n.temTraducao('🇧🇷 Português'), 'o rótulo do próprio seletor tem entrada (fica igual de propósito)');
+ok(i18n.t('🇧🇷 Português') === '🇧🇷 Português', 'o seletor de idioma não traduz o próprio nome do idioma');
 
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

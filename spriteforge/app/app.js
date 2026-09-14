@@ -11,6 +11,7 @@ import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { zipSync, strToU8 } from './libs/fflate.module.js';
 import * as core from './core.js';
+import { aplicarIdioma, t, idiomaAtual } from './i18n.js';
 
 /* ================================================================== *
  * 0. Referências de DOM e estado
@@ -37,7 +38,7 @@ const el = {
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
   sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), chkPivotMark: $('chkPivotMark'), sheetInfo: $('sheetInfo'),
-  btnReframe: $('btnReframe'),
+  btnReframe: $('btnReframe'), selIdioma: $('selIdioma'),
   dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlSheetShadow: $('dlSheetShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   chkPlayerShadow: $('chkPlayerShadow'),
@@ -65,7 +66,7 @@ const state = {
 };
 
 const setStatus = (msg, kind = '') => {
-  el.status.textContent = msg;
+  el.status.textContent = t(msg);   // mensagens estáticas já saem traduzidas
   el.status.className = kind;
 };
 
@@ -299,14 +300,14 @@ function clearModel() {
   state.model = null;
   state.clips = [];
   state.clipIndex = -1;
-  setStatus(`modelo anterior liberado (${stats.geometries} geometrias, ${stats.materials} materiais, ${stats.textures} texturas)`, 'ok');
+  setStatus(t('modelo anterior liberado ({g} geometrias, {m} materiais, {tex} texturas)', { g: stats.geometries, m: stats.materials, tex: stats.textures }), 'ok');
 }
 
 function buildClipList() {
   el.clipSelect.innerHTML = '';
   const none = document.createElement('option');
   none.value = '-1';
-  none.textContent = '— sem animação (1 frame) —';
+  none.textContent = t('— sem animação (1 frame) —');
   el.clipSelect.appendChild(none);
   state.clips.forEach((clip, i) => {
     const opt = document.createElement('option');
@@ -338,7 +339,7 @@ function selectClip(index) {
   el.scrubVal.textContent = '0.00s';
   el.scrub.value = '0';
   el.btnGenerate.textContent = clip ? 'Gerar spritesheet' : 'Gerar sheet (1 frame por direção)';
-  setStatus(clip ? `clip "${clip.name}" — ${dur.toFixed(3)}s` : 'modelo sem animação — 1 frame por direção');
+  setStatus(clip ? t('clip "{nome}" — {d}s', { nome: clip.name, d: dur.toFixed(3) }) : 'modelo sem animação — 1 frame por direção');
 }
 
 /** Material padrão para formatos que não trazem material (STL, PLY). */
@@ -432,13 +433,22 @@ function applyModel(root, animations, fileName) {
     if (pos) triangles += (o.geometry.index ? o.geometry.index.count : pos.count) / 3;
   });
 
-  el.modelInfo.textContent = `${state.name} · ${core.formatOf(fileName).toUpperCase()} · ${prepared.meshes} mesh · ${Math.round(triangles)} tris · ${state.clips.length} clip(s)`;
-  el.viewBadge.textContent = `${state.name} — ${state.clips.length ? `${state.clips.length} animação(ões)` : 'sem animação (1 frame por direção)'}`;
+  // Guardado como função: trocar de idioma precisa refazer estes textos.
+  state.infoModeloFn = () => {
+    el.modelInfo.textContent = t('{nome} · {fmt} · {meshes} mesh · {tris} tris · {clips} clip(s)', {
+      nome: state.name, fmt: core.formatOf(fileName).toUpperCase(),
+      meshes: prepared.meshes, tris: Math.round(triangles), clips: state.clips.length
+    });
+    el.viewBadge.textContent = state.clips.length
+      ? t('{nome} — {n} animação(ões)', { nome: state.name, n: state.clips.length })
+      : t('{nome} — sem animação (1 frame por direção)', { nome: state.name });
+  };
+  state.infoModeloFn();
   el.btnGenerate.disabled = false;
   hideError();
   setStatus(
-    `"${state.name}" carregado (${core.formatInfo(fileName)?.label || fileName})` +
-      (state.clips.length ? `: ${state.clips.map((c) => c.name).join(', ')}` : ' — sem animação') +
+    t('"{nome}" carregado ({fmt})', { nome: state.name, fmt: core.formatInfo(fileName)?.label || fileName }) +
+      (state.clips.length ? `: ${state.clips.map((c) => c.name).join(', ')}` : t(' — sem animação')) +
       (prepared.computedNormals ? ` · ${prepared.computedNormals} normal(is) calculada(s)` : ''),
     'ok'
   );
@@ -476,7 +486,7 @@ async function loadFiles(fileList) {
   }
   hideError();
   try {
-    setStatus(`lendo ${main.name}…`);
+    setStatus(t('lendo {nome}…', { nome: main.name }));
     const buffer = await main.arrayBuffer();
     const siblings = new Map();
     for (const f of files) if (f !== main) siblings.set(f.name, new Uint8Array(await f.arrayBuffer()));
@@ -496,7 +506,7 @@ async function loadFiles(fileList) {
 async function loadSample(filename = 'fox.glb') {
   try {
     hideError();
-    setStatus(`carregando samples/${filename}…`);
+    setStatus(t('carregando samples/{arquivo}…', { arquivo: filename }));
     const res = await fetch(`./samples/${filename}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { root, animations } = await parseModel({ name: filename }, await res.arrayBuffer(), new Map());
@@ -648,8 +658,41 @@ presetButtons.forEach((btn) => btn.addEventListener('click', () => {
   applySettings(core.presetSettings(name));
   markPreset(name);
   saveSettings(name);
-  setStatus(`predefinição "${btn.textContent.trim()}" aplicada — ajuste o que quiser e gere`, 'ok');
+  setStatus(t('predefinição "{nome}" aplicada — ajuste o que quiser e gere', { nome: btn.textContent.trim() }), 'ok');
 }));
+
+/** Refaz os textos que o app monta em tempo de execução. */
+function redesenharTextosDinamicos() {
+  if (state.model) {
+    const clipAntes = el.clipSelect.value;
+    buildClipList();
+    el.clipSelect.value = clipAntes;      // buildClipList reseta para o primeiro
+    if (state.infoModeloFn) state.infoModeloFn();
+  }
+  if (state.result) {
+    if (state.result.infoFn) state.result.infoFn();
+    const dirAntes = el.playerDir.value;
+    buildDirectionSelector();
+    el.playerDir.value = dirAntes;
+  }
+}
+
+/* ---- idioma ----
+ * O português é a língua fonte (mora no HTML e aqui); o inglês vem do i18n.js.
+ * A escolha fica no localStorage, então cada pessoa mantém a sua no próprio
+ * navegador — o Lucas continua em pt-BR e o amigo gringo em inglês. */
+const IDIOMA_SALVO = 'spriteforge.idioma';
+function trocarIdioma(lang) {
+  aplicarIdioma(lang);
+  try { localStorage.setItem(IDIOMA_SALVO, idiomaAtual()); } catch { /* modo privado */ }
+  // Textos que o app monta dinamicamente precisam ser refeitos na hora.
+  redesenharTextosDinamicos();
+}
+el.selIdioma.addEventListener('change', () => trocarIdioma(el.selIdioma.value));
+try {
+  const salvo = localStorage.getItem(IDIOMA_SALVO);
+  if (salvo) { el.selIdioma.value = salvo; aplicarIdioma(salvo); }
+} catch { /* sem localStorage: fica em pt-BR */ }
 
 el.btnReframe.addEventListener('click', () => {
   framePreview();
@@ -680,7 +723,7 @@ el.chkLockScale.addEventListener('change', () => {
   el.rowScaleLock.hidden = !el.chkLockScale.checked;
   if (!el.chkLockScale.checked) return;
   const ppu = calibrateScaleLock();
-  if (ppu) setStatus(`escala travada em ${ppu.toFixed(2)} px/unidade (calibrada neste modelo) — mude para combinar com outros projetos`, 'ok');
+  if (ppu) setStatus(t('escala travada em {v} px/unidade (calibrada neste modelo) — mude para combinar com outros projetos', { v: ppu.toFixed(2) }), 'ok');
 });
 el.rngLightAz.addEventListener('input', applyLightRig);
 el.rngLightInt.addEventListener('input', applyLightRig);
@@ -869,7 +912,7 @@ const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 const showProgress = (on) => el.progressWrap.classList.toggle('on', on);
 const setProgress = (ratio, label) => {
   el.progressBar.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
-  el.progressLabel.textContent = label;
+  el.progressLabel.textContent = t(label);
 };
 
 function applyBackground(mode) {
@@ -1014,7 +1057,7 @@ async function generate() {
       const rect = core.cellRect(layout, pose.dir, pose.frame);
       sctx.drawImage(sheetRenderer.domElement, rect.x, rect.y, rect.w, rect.h);
       done++;
-      setProgress(0.02 + 0.68 * (done / poses.length), `renderizando ${done}/${poses.length} — dir ${String(pose.dir).padStart(2, '0')}, frame ${pose.frame + 1}`);
+      setProgress(0.02 + 0.68 * (done / poses.length), t('renderizando {i}/{n} — dir {d}, frame {f}', { i: done, n: poses.length, d: String(pose.dir).padStart(2, '0'), f: pose.frame + 1 }));
       await yieldToBrowser();
     }
 
@@ -1051,7 +1094,7 @@ async function generate() {
         const rect = core.cellRect(layout, pose.dir, pose.frame);
         shctx.drawImage(sheetRenderer.domElement, rect.x, rect.y, rect.w, rect.h);
         doneShadow++;
-        setProgress(0.72 + 0.25 * (doneShadow / poses.length), `sombra ${doneShadow}/${poses.length}`);
+        setProgress(0.72 + 0.25 * (doneShadow / poses.length), t('sombra {i}/{n}', { i: doneShadow, n: poses.length }));
         await yieldToBrowser();
       }
       materiais.forEach((m, i) => { m.colorWrite = colorWriteAntes[i]; });
@@ -1080,27 +1123,34 @@ async function generate() {
     state.player.dir = 0;
     state.player.frame = 0;
     showTab('results');
-    el.sheetInfo.textContent =
-      `${layout.w}×${layout.h} px · ${layout.cols} frames × ${layout.rows} direções · célula ${layout.cell}px` +
-      (layout.padding ? ` + ${layout.padding}px de vão` : '') +
-      (ssaa ? ' · SSAA 2x' : '') +
-      ` · half=${half.toFixed(2)} · pivot ${pivot}`;
-    el.jsonInfo.textContent =
-      `${meta.image} · ${Object.keys(meta.frames).length} frames · ${fps} fps · elevação ${elevation}°` +
-      (azimuthOffset ? ` · frente ${azimuthOffset}°` : '') +
-      ` · ${turntable ? 'turntable' : 'modelo girando'}` +
-      (lockScale ? ` · ${pxPerUnit} px/unidade` : '');
+    state.result.infoFn = () => {
+      el.sheetInfo.textContent =
+        t('{w}×{h} px · {cols} frames × {rows} direções · célula {cell}px', {
+          w: layout.w, h: layout.h, cols: layout.cols, rows: layout.rows, cell: layout.cell
+        }) +
+        (layout.padding ? t(' + {p}px de vão', { p: layout.padding }) : '') +
+        (ssaa ? ' · SSAA 2x' : '') +
+        ` · half=${half.toFixed(2)} · pivot ${pivot}`;
+      el.jsonInfo.textContent =
+        t('{arquivo} · {n} frames · {fps} fps · elevação {elev}°', {
+          arquivo: meta.image, n: Object.keys(meta.frames).length, fps, elev: elevation
+        }) +
+        (azimuthOffset ? t(' · frente {az}°', { az: azimuthOffset }) : '') +
+        ` · ${turntable ? 'turntable' : t('modelo girando')}` +
+        (lockScale ? t(' · {ppu} px/unidade', { ppu: pxPerUnit }) : '');
+    };
+    state.result.infoFn();
     drawSheetPreview();
     buildDirectionSelector();
     drawPlayer();
     el.gifList.innerHTML = '';
     if (warnings.length) setStatus(warnings.join(' · '), 'err');
-    else setStatus(`sheet pronta: ${layout.w}×${layout.h} (${layout.cols}×${layout.rows} células de ${layout.cell}px)${shadowSheet ? ' · camada de sombra pronta no botão shadow.png' : ''}`, 'ok');
+    else setStatus(t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)', { w: layout.w, h: layout.h, cols: layout.cols, rows: layout.rows, cell: layout.cell }) + (shadowSheet ? t(' · camada de sombra pronta no botão shadow.png') : ''), 'ok');
   } catch (err) {
     if (err && err.name === 'AbortError') setStatus('geração cancelada — a sheet anterior continua válida', 'err');
     else {
       console.error(err);
-      setStatus(`falha na geração: ${err.message}`, 'err');
+      setStatus(t('falha na geração: {msg}', { msg: err.message }), 'err');
     }
   } finally {
     state.model.rotation.y = prevRotation;
@@ -1184,7 +1234,7 @@ function buildDirectionSelector() {
   for (let d = 0; d < r.dirCount; d++) {
     const opt = document.createElement('option');
     opt.value = String(d);
-    opt.textContent = `dir${String(d).padStart(2, '0')} · ${Math.round(d * step)}°`;
+    opt.textContent = `dir${String(d).padStart(2, '0')} · ${Math.round(d * step)}°`;   // só números
     el.playerDir.appendChild(opt);
   }
   el.playerDir.value = String(state.player.dir);
@@ -1379,7 +1429,7 @@ async function buildGifs(r, source, delay, opcao, sombraSource = null) {
         transparent: opcao.transparente, dither: opcao.pontilhado, alphaCut: opcao.alphaCut
       })
     });
-    setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
+    setProgress((d + 1) / r.dirCount, t('GIF dir{d} ({i}/{n})', { d: String(d).padStart(2, '0'), i: d + 1, n: r.dirCount }));
     await yieldToBrowser();
   }
   return out;
@@ -1402,7 +1452,7 @@ function montarGifs(gifs, sufixo, rotulo) {
     img.width = size;
     img.height = size;
     const cap = document.createElement('figcaption');
-    cap.textContent = `dir${String(dir).padStart(2, '0')} · ${size}px`;
+    cap.textContent = `dir${String(dir).padStart(2, '0')} · ${size}px`;   // só números: nada a traduzir
     const link = document.createElement('a');
     link.href = url;
     link.download = `${base}_dir${String(dir).padStart(2, '0')}${sufixo}.gif`;
@@ -1488,10 +1538,10 @@ async function downloadZip() {
     await yieldToBrowser();
     const zip = zipSync(files, { level: 6 });
     downloadBlob(new Blob([zip], { type: 'application/zip' }), `${base}_spriteforge.zip`);
-    setStatus(`zip pronto: ${(zip.length / 1024).toFixed(0)} KB, ${Object.keys(files).length} arquivos`, 'ok');
+    setStatus(t('zip pronto: {kb} KB, {n} arquivos', { kb: (zip.length / 1024).toFixed(0), n: Object.keys(files).length }), 'ok');
   } catch (err) {
     console.error(err);
-    setStatus(`falha no zip: ${err.message}`, 'err');
+    setStatus(t('falha no zip: {msg}', { msg: err.message }), 'err');
   } finally {
     el.dlZip.disabled = false;
     showProgress(false);
@@ -1532,7 +1582,7 @@ async function generateGifs() {
     );
   } catch (err) {
     console.error(err);
-    setStatus(`falha no GIF: ${err.message}`, 'err');
+    setStatus(t('falha no GIF: {msg}', { msg: err.message }), 'err');
   } finally {
     el.btnGif.disabled = false;
     showProgress(false);
@@ -1552,7 +1602,7 @@ showTab('3d');
 resizeViewport();
 tick();
 requestAnimationFrame(playerTick);
-if (glProblems.length) setStatus(`WebGL com problema — ${glProblems.join(' | ')}`, 'err');
+if (glProblems.length) setStatus(t('WebGL com problema — {detalhe}', { detalhe: glProblems.join(' | ') }), 'err');
 else {
   setStatus(
     'pronto — arraste um modelo (.glb, .gltf, .obj, .fbx, .stl, .ply), use "Abrir" ou carregue o exemplo (Fox)' +
