@@ -111,7 +111,33 @@ ok(el2.rngCell.value === '1024' && el2.cellVal.value === '1024', `preset/ajuste 
 aplicar('rngCell', 'cellVal', 128);
 ok(el2.rngCell.value === '128' && el2.rngCell.max === '512', `voltar a 128 devolve o teto: max=${el2.rngCell.max}`);
 
-const total = 17;
+
+/* ---- opcoesGif(): como cada GIF sai (também código real do app.js) ---- */
+const iniOp = src.indexOf('function opcoesGif() {');
+const fimOp = src.indexOf('\n}', src.indexOf('rotulo:', src.indexOf('sombra: {', iniOp))) + 2;
+const opcoesSrc = src.slice(iniOp, fimOp);
+if (!opcoesSrc.includes("alphaCut: modo === 'pontilhado'")) {
+  console.log('FALHA: opcoesGif não foi extraído como esperado'); fail++;
+} else {
+  const rodar = (bg, modo) => new Function('el', 'core', 'GIF_BG', 'state',
+    opcoesSrc + '; return opcoesGif();')(
+    { selGifBg: { value: bg }, selShadowGif: { value: modo } },
+    { GIF_ALPHA_CUT: 128 }, { white: '#ffffff', dark: '#15181d' }, { result: { dirCount: 8 } }
+  );
+  let o = rodar('dither', 'silhueta');
+  ok(o.personagem.transparente === true && o.personagem.pontilhado === true && o.personagem.alphaCut === 128,
+    `GIF do personagem no padrão: transparente+pontilhado, corte ${o.personagem.alphaCut}`);
+  ok(o.sombra.transparente === true && o.sombra.pontilhado === false && o.sombra.alphaCut === 8,
+    `GIF da sombra: transparente e silhueta (corte ${o.sombra.alphaCut} -> preto sólido)`);
+  o = rodar('white', 'silhueta');
+  ok(o.personagem.transparente === false && o.personagem.fundo === '#ffffff', 'fundo branco compõe o GIF do personagem');
+  ok(o.sombra.transparente === true, 'o GIF da sombra nunca ganha fundo sólido');
+  o = rodar('transparent', 'pontilhado');
+  ok(o.sombra.pontilhado === true && o.sombra.alphaCut === 128, 'sombra pontilhada usa Bayer com corte 128');
+  ok(o.personagem.rotulo.includes('personagem') && o.sombra.rotulo.includes('sombra'), 'cada conjunto tem legenda própria');
+}
+
+const total = 23;
 console.log(fail === 0
   ? `\n${total} passou, 0 falhou — sync slider/campo digitado do app.js`
   : `\n${total - fail} passou, ${fail} falhou`);

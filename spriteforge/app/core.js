@@ -85,7 +85,7 @@ export const DEFAULT_SETTINGS = {
   turntable: false, background: 'transparent', shadow: true,
   lightCamera: false, lightAz: 34, lightIntensity: 2.6,
   loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'dither',
-  shadowLayer: true, playerShadow: true
+  shadowLayer: true, playerShadow: true, shadowGif: 'silhueta'
 };
 
 /**
@@ -590,6 +590,27 @@ export function buildAsepriteJson(meta) {
  *
  * @param {Array<Uint8ClampedArray>} frames RGBA, comprimento w*h*4
  */
+/** Garante a cor transparente no índice 0 SEM apagar uma cor de verdade.
+ *
+ *  O que se fazia antes era `palette[0] = [255,0,255]`, e isso rouba um slot:
+ *  se o índice 0 já tinha uma cor da imagem, todos os pixels daquela cor viravam
+ *  transparentes. Num quadro só de sombra a paleta tem UMA cor (o preto), então a
+ *  sombra inteira sumia — o GIF saía byte a byte igual ao de um quadro vazio. */
+export function reservarTransparente(palette) {
+  const alvo = [255, 0, 255];
+  const mesmo = (c) => c[0] === 255 && c[1] === 0 && c[2] === 255;
+  const achou = palette.findIndex(mesmo);
+  if (achou === 0) return palette;
+  if (achou > 0) {                       // troca: o magenta assume o índice 0
+    palette[achou] = palette[0];
+    palette[0] = alvo;
+    return palette;
+  }
+  palette.push(alvo.slice());            // não havia magenta: acrescenta uma cor
+  palette.unshift(palette.pop());        // quantize(data, 255) deixa vaga para ela
+  return palette;
+}
+
 export function encodeGif({ width, height, frames, delays = [], repeat = 0, alphaCut = GIF_ALPHA_CUT, transparent = true, dither = false }) {
   const gif = GIFEncoder();
   const count = width * height;
@@ -605,8 +626,7 @@ export function encodeGif({ width, height, frames, delays = [], repeat = 0, alph
           data[p * 4 + 2] = 255;
         }
       }
-      palette = quantize(data, 255);
-      palette[0] = [255, 0, 255];
+      palette = reservarTransparente(quantize(data, 255));
     } else {
       palette = quantize(data, 256);
     }

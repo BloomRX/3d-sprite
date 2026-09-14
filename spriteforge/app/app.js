@@ -40,7 +40,7 @@ const el = {
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   chkPlayerShadow: $('chkPlayerShadow'),
   rngFps: $('rngFps'), fpsVal: $('fpsVal'), rngZoom: $('rngZoom'), zoomVal: $('zoomVal'),
-  btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), selGifBg: $('selGifBg'), gifList: $('gifList'), status: $('status')
+  btnGif: $('btnGif'), rngGifScale: $('rngGifScale'), selGifBg: $('selGifBg'), selShadowGif: $('selShadowGif'), gifList: $('gifList'), status: $('status')
 };
 const faltando = Object.entries(el).filter(([, node]) => !node).map(([k]) => k);
 if (faltando.length) console.error('ids ausentes no index.html:', faltando.join(', '));
@@ -555,7 +555,8 @@ function applySettings(s) {
   setPair('rngFps', 'fpsVal', s.fps);
   setPair('rngZoom', 'zoomVal', s.zoom);
   el.rngGifScale.value = String(s.gifScale);
-  el.selGifBg.value = s.gifBg;
+  el.selGifBg.value = s.gifBg || 'dither';
+  el.selShadowGif.value = s.shadowGif || 'silhueta';
   el.chkShadowLayer.checked = !!s.shadowLayer;
   el.chkPlayerShadow.checked = !!s.playerShadow;
   el.chkLightCamera.checked = !!s.lightCamera;
@@ -588,6 +589,7 @@ function readSettings() {
     zoom: Number(el.rngZoom.value),
     gifScale: Number(el.rngGifScale.value),
     gifBg: el.selGifBg.value,
+    shadowGif: el.selShadowGif.value,
     shadowLayer: el.chkShadowLayer.checked,
     playerShadow: el.chkPlayerShadow.checked,
     lightCamera: el.chkLightCamera.checked,
@@ -738,7 +740,8 @@ const SETTING_CONTROLS = [
   el.selDirections, el.rngFrames, el.rngElevation, el.rngAzimuth, el.selPivot, el.rngCell,
   el.rngPadding, el.chkSsaa, el.chkLockScale, el.rngScaleLock, el.chkTurntable, el.selBackground,
   el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale, el.selGifBg,
-  el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow
+  el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow,
+  el.selShadowGif
 ];
 SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => { markPreset(null); saveSettings(null); }));
 
@@ -1232,11 +1235,36 @@ el.dlAseprite.addEventListener('click', () => {
  */
 const GIF_BG = { white: '#ffffff', dark: '#15181d' };
 
-async function buildGifs(r, sctx, delay) {
-  const scale = Number(el.rngGifScale.value) || 1;
+/** Como o GIF sai. A folha do personagem segue o fundo escolhido; a da sombra é
+ *  sempre transparente — um sprite de sombra com fundo sólido não serve para nada. */
+function opcoesGif() {
   const bg = el.selGifBg.value;
-  const transparente = bg === 'transparent' || bg === 'dither';
-  const pontilhado = bg === 'dither';
+  const modo = el.selShadowGif.value || 'silhueta';
+  return {
+    personagem: {
+      transparente: bg === 'transparent' || bg === 'dither',
+      pontilhado: bg === 'dither',
+      alphaCut: core.GIF_ALPHA_CUT,
+      fundo: GIF_BG[bg] || '#ffffff',
+      rotulo: `GIFs do personagem — dir00…dir${String(state.result ? state.result.dirCount - 1 : 7).padStart(2, '0')}`
+    },
+    sombra: {
+      transparente: true,
+      pontilhado: modo === 'pontilhado',
+      // silhueta: corte baixo para os 35% de alpha virarem preto sólido. É o que
+      // dá para usar em jogo — no motor você escolhe a transparência (modulate /
+      // self_modulate), coisa que o GIF, com alpha de 1 bit, não consegue guardar.
+      alphaCut: modo === 'pontilhado' ? core.GIF_ALPHA_CUT : 8,
+      fundo: null,
+      rotulo: 'GIFs da sombra — sprite à parte, desenhe antes do personagem'
+    }
+  };
+}
+
+/** Codifica um GIF por direção a partir de qualquer folha na mesma grade
+ *  (a do personagem ou a da sombra — as duas têm célula, linhas e colunas iguais). */
+async function buildGifs(r, source, delay, opcao) {
+  const scale = Number(el.rngGifScale.value) || 1;
   const cell = r.layout.cell;
   const size = Math.max(1, Math.round(cell * scale));
   const tmp = document.createElement('canvas');
@@ -1254,22 +1282,52 @@ async function buildGifs(r, sctx, delay) {
       // verdade e o GIF fica igual ao preview. Sem fundo ela não tem como
       // existir: o corte em 50% a remove — o que NÃO se pode fazer é deixá-la
       // semitransparente, porque aí ela sai preta sólida (era o bug).
-      if (!transparente) {
-        tctx.fillStyle = GIF_BG[bg] || '#ffffff';
+      if (!opcao.transparente) {
+        tctx.fillStyle = opcao.fundo || '#ffffff';
         tctx.fillRect(0, 0, size, size);
       }
-      tctx.drawImage(r.sheet, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
+      tctx.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, size, size);
       frames.push(tctx.getImageData(0, 0, size, size).data);
     }
     out.push({
       dir: d,
       size,
-      bytes: core.encodeGif({ width: size, height: size, frames, delays: frames.map(() => delay), transparent: transparente, dither: pontilhado })
+      bytes: core.encodeGif({
+        width: size, height: size, frames, delays: frames.map(() => delay),
+        transparent: opcao.transparente, dither: opcao.pontilhado, alphaCut: opcao.alphaCut
+      })
     });
     setProgress((d + 1) / r.dirCount, `GIF dir${String(d).padStart(2, '0')} (${d + 1}/${r.dirCount})`);
     await yieldToBrowser();
   }
   return out;
+}
+
+/** Coloca um conjunto de GIFs na lista, com legenda e link de download. */
+function montarGifs(gifs, sufixo, rotulo) {
+  const base = state.result.meta.image.replace(/_sheet\.png$/, '');
+  const titulo = document.createElement('div');
+  titulo.className = 'gifGroup';
+  titulo.textContent = rotulo;
+  el.gifList.appendChild(titulo);
+  for (const { dir, bytes, size } of gifs) {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
+    state.gifUrls.set(sufixo + dir, url);
+    const fig = document.createElement('figure');
+    fig.className = 'gifItem';
+    const img = document.createElement('img');
+    img.src = url;
+    img.width = size;
+    img.height = size;
+    const cap = document.createElement('figcaption');
+    cap.textContent = `dir${String(dir).padStart(2, '0')} · ${size}px`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${base}_dir${String(dir).padStart(2, '0')}${sufixo}.gif`;
+    link.textContent = 'baixar';
+    fig.append(img, cap, link);
+    el.gifList.appendChild(fig);
+  }
 }
 
 /** Tudo o que o ZIP leva, com a receita de uso dentro. */
@@ -1292,6 +1350,13 @@ function readmeDoZip(r) {
     `  (${m.grid.cols}x${m.grid.rows}); Pivot = Custom, em pixels: (pivot.x * ${m.cell.w}, (1 - pivot.y) * ${m.cell.h}).`,
     '',
     'Aseprite: File > Import Sprite Sheet, usando o .aseprite.json (ja traz as tags dirNN e o anchor).',
+    '',
+    m.shadow
+      ? `gif/ tem um GIF animado por direcao do personagem; gif_sombra/ tem o mesmo tanto da`
+        + ` sombra (sprite a parte, mesma grade). No motor: desenhe o GIF da sombra ANTES do`
+        + ` personagem e esconda o no dele para tirar a sombra. ${m.shadow.file} e a folha da`
+        + ` sombra, para quem prefere spritesheet a GIF.`
+      : 'gif/ tem um GIF animado por direcao.',
     '',
     'Os GIFs em gif/ sao so para conferencia visual: GIF tem 256 cores por quadro e',
     'nao guarda alpha de verdade (usa o indice 0). Para o jogo use o PNG + metadata.'
@@ -1323,8 +1388,14 @@ async function downloadZip() {
     }
     setProgress(0.35, 'codificando os GIFs…');
     const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
-    const gifs = await buildGifs(r, r.sheet.getContext('2d', { willReadFrequently: true }), delay);
+    const opcoes = opcoesGif();
+    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem);
     for (const g of gifs) files[`gif/${base}_dir${String(g.dir).padStart(2, '0')}.gif`] = g.bytes;
+    if (r.shadowSheet) {
+      setProgress(0.6, 'codificando os GIFs da sombra…');
+      const gifsSombra = await buildGifs(r, r.shadowSheet, delay, opcoes.sombra);
+      for (const g of gifsSombra) files[`gif_sombra/${base}_dir${String(g.dir).padStart(2, '0')}_shadow.gif`] = g.bytes;
+    }
     setProgress(0.9, 'zipando…');
     await yieldToBrowser();
     const zip = zipSync(files, { level: 6 });
@@ -1343,36 +1414,27 @@ el.dlZip.addEventListener('click', downloadZip);
 async function generateGifs() {
   const r = state.result;
   if (!r) { setStatus('gere a sheet antes dos GIFs', 'err'); return; }
-  const base = r.meta.image.replace(/_sheet\.png$/, '');
   const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
-  const sctx = r.sheet.getContext('2d', { willReadFrequently: true });
+  const opcoes = opcoesGif();
   el.btnGif.disabled = true;
   el.gifList.innerHTML = '';
   for (const url of state.gifUrls.values()) URL.revokeObjectURL(url);
   state.gifUrls.clear();
   showProgress(true);
   try {
-    const gifs = await buildGifs(r, sctx, delay);
-    for (const { dir, bytes, size } of gifs) {
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'image/gif' }));
-      state.gifUrls.set(dir, url);
-      const fig = document.createElement('figure');
-      fig.className = 'gifItem';
-      const img = document.createElement('img');
-      img.src = url;
-      img.width = size;
-      img.height = size;
-      const cap = document.createElement('figcaption');
-      cap.textContent = `dir${String(dir).padStart(2, '0')} · ${size}px`;
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${base}_dir${String(dir).padStart(2, '0')}.gif`;
-      link.textContent = 'baixar';
-      fig.append(img, cap, link);
-      el.gifList.appendChild(fig);
+    const gifs = await buildGifs(r, r.sheet, delay, opcoes.personagem);
+    montarGifs(gifs, '', opcoes.personagem.rotulo);
+    let extra = '';
+    if (r.shadowSheet) {
+      setProgress(0.5, 'codificando os GIFs da sombra…');
+      const gifsSombra = await buildGifs(r, r.shadowSheet, delay, opcoes.sombra);
+      montarGifs(gifsSombra, '_shadow', opcoes.sombra.rotulo);
+      extra = ` + ${r.dirCount} da sombra (${el.selShadowGif.value === 'pontilhado' ? 'pontilhada a 35%' : 'silhueta preta'})`;
+    } else {
+      extra = ' — sem a camada de sombra: marque "Camada de sombra separada" e gere de novo';
     }
     setStatus(
-      `${r.dirCount} GIFs prontos (${gifs[0].size}px) — ` +
+      `${r.dirCount} GIFs prontos (${gifs[0].size}px)${extra} — ` +
       (el.selGifBg.value === 'dither'
         ? 'transparente com sombra pontilhada (Bayer 4x4: alpha de 1 bit fingindo 35%)'
         : el.selGifBg.value === 'transparent'

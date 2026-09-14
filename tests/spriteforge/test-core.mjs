@@ -351,6 +351,46 @@ let transDither = 0;
 for (let i = 0; i < gifDither.length - 5; i++) if (gifDither[i] === 0x21 && gifDither[i + 1] === 0xf9 && (gifDither[i + 3] & 0x01)) transDither++;
 ok(transDither === N, `os ${N} quadros do GIF pontilhado continuam transparentes (${transDither})`);
 ok(core.BAYER4.length === 4 && core.BAYER4.every((l) => l.length === 4), 'matriz de Bayer 4x4');
+
+/* ---- a cor transparente não pode roubar uma cor de verdade ---- */
+ok(JSON.stringify(core.reservarTransparente([[0, 0, 0]])) === '[[255,0,255],[0,0,0]]',
+  'paleta de UMA cor (quadro só de sombra) ganha o magenta sem perder o preto');
+ok(JSON.stringify(core.reservarTransparente([[0, 0, 0], [255, 0, 255]])) === '[[255,0,255],[0,0,0]]',
+  'magenta fora do índice 0 é trocado para o índice 0');
+ok(JSON.stringify(core.reservarTransparente([[0, 0, 0], [255, 0, 0]])) === '[[255,0,255],[0,0,0],[255,0,0]]',
+  'sem magenta na imagem, acrescenta uma cor em vez de sobrescrever');
+ok(JSON.stringify(core.reservarTransparente([[255, 0, 255], [0, 0, 0]])) === '[[255,0,255],[0,0,0]]',
+  'com o magenta já no índice 0, a paleta não muda');
+
+/* ---- GIF da sombra como sprite à parte (silhueta preta) ---- */
+const SQ = 16;
+const contar = SQ * SQ;
+const quadroSombra = new Uint8ClampedArray(contar * 4);
+const quadroVazio = new Uint8ClampedArray(contar * 4);
+const quadroOpaco = new Uint8ClampedArray(contar * 4);
+const quadroMeio = new Uint8ClampedArray(contar * 4);
+for (let i = 0; i < contar; i++) {
+  quadroSombra.set([0, 0, 0, 89], i * 4);      // ShadowMaterial 0,35 sobre transparente
+  quadroOpaco.set([0, 0, 0, 255], i * 4);
+  if (i < contar / 2) quadroMeio.set([0, 0, 0, 89], i * 4);
+}
+const gifDeSombra = (f, cut, dither) => Buffer.from(core.encodeGif({
+  width: SQ, height: SQ, frames: [f], delays: [83], transparent: true, alphaCut: cut, dither: !!dither
+}));
+const silhueta = gifDeSombra(quadroSombra, 8);
+const vazioGif = gifDeSombra(quadroVazio, 8);
+ok(silhueta[0] === 0x47 && silhueta[silhueta.length - 1] === 0x3b, 'GIF da sombra em silhueta é um GIF válido');
+ok(silhueta.equals(gifDeSombra(quadroOpaco, 8)),
+  'a silhueta (alpha 89, corte 8) sai igual a um preto 100% opaco — é isso que o motor vai modular');
+ok(!silhueta.equals(vazioGif), 'a silhueta não é um quadro vazio');
+ok(gifDeSombra(quadroSombra, 128).equals(vazioGif),
+  'com corte 128 e sem dither a sombra some inteira — é o que o usuário viu');
+const pontilhadoGif = gifDeSombra(quadroSombra, 128, true);
+ok(!pontilhadoGif.equals(vazioGif) && !pontilhadoGif.equals(silhueta),
+  'a sombra pontilhada difere tanto do vazio quanto do sólido');
+ok(!gifDeSombra(quadroMeio, 8).equals(silhueta) && !gifDeSombra(quadroMeio, 8).equals(vazioGif),
+  'meio quadro de sombra é diferente dos dois extremos');
+ok(core.DEFAULT_SETTINGS.shadowGif === 'silhueta', 'GIF da sombra em silhueta por padrão');
 ok(new Set(core.BAYER4.flat()).size === 16, 'os 16 limiares de Bayer são distintos');
 const sombra = new Uint8ClampedArray(4 * 4);
 for (let i = 0; i < 4; i++) sombra.set([0, 0, 0, 89], i * 4);

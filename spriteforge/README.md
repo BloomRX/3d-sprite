@@ -113,6 +113,7 @@ cola tudo para colar num relato de bug.
 | **Escala do GIF** | 100 / 50 / 25 % | reduz antes de quantizar (GIF tem 256 cores por quadro) |
 | **Fundo do GIF** | transparente / **pontilhado** / branco / escuro | GIF tem alpha de **1 bit**. `transparente` recorta em 50 % (sem halo, sem sombra); `pontilhado` usa Bayer 4×4 e mantém a sombra como pontinho (35 % de alpha ≈ 37,5 % de pontos); com fundo a sombra é composta de verdade |
 | **Camada de sombra separada** | on/off | segundo passe de render que gera `<nome>_shadow.png` na mesma grade, só com a sombra — para ligar/desligar no jogo |
+| **GIF da sombra** | silhueta preta / pontilhada | um **GIF animado por direção** só da sombra, para usar como sprite à parte ao lado do personagem |
 
 Todo slider tem um **campo numérico** do lado: dá para digitar `512` em vez de arrastar.
 O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
@@ -126,6 +127,7 @@ O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 | `<nome>.aseprite.json` | sidecar Aseprite: `frames` em array + `meta.frameTags` |
 | `<nome>_dirNN.gif` | um GIF animado por direção, com transparência |
 | **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas). Botão próprio, em linha separada logo abaixo do `metadata.json` — e também vai dentro do `.zip` |
+| **`<nome>_dirNN_shadow.gif`** | **GIF animado da sombra**, um por direção — o sprite à parte que você coloca junto do personagem. Sai no **Gerar GIFs** (grupo "GIFs da sombra") e na pasta `gif_sombra/` do `.zip` |
 | **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
@@ -159,6 +161,25 @@ Ela é renderizada num segundo passe com `material.colorWrite = false` no modelo
 continua projetando sombra, mas não escreve cor — então a imagem resultante tem apenas a
 sombra no chão, em preto com alpha 0,35 sobre transparente. Por ser um segundo passe, a
 geração leva ~2× o tempo; desmarque a opção se não quiser.
+
+### A sombra como GIF (sprite à parte)
+
+O **Gerar GIFs** produz dois grupos: os do personagem e os **da sombra** — o mesmo número de
+arquivos, um por direção, animados e transparentes. No `.zip` eles ficam em `gif_sombra/`.
+É isso que dá para colocar no motor como um segundo sprite junto do personagem:
+
+```gdscript
+# Godot 4 — dois AnimatedSprite2D, um por GIF
+sombra.play(&"andar")
+sombra.frame = personagem.frame
+sombra.visible = mostrar_sombra     # ligar e desligar a sombra é só isso
+```
+
+O GIF da sombra sai em **silhueta preta** por padrão. GIF tem alpha de 1 bit, então os 35 % de
+transparência não caberiam nele de qualquer jeito; preto sólido é o formato útil, porque a
+transparência você escolhe no motor (`self_modulate = Color(1,1,1,0.35)` no Godot, cor com
+alpha no Unity) e ainda pode mudar de cor, esmaecer no pulo, etc. A opção **pontilhada**
+mantém a aparência de 35 % via Bayer 4×4, mas aí a transparência fica queimada na imagem.
 
 ## Receitas de engine
 
@@ -287,20 +308,33 @@ func _ready() -> void:
     cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
     especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
     mesma biblioteca que roda no navegador.
-22. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
+22. **O índice 0 da paleta não pode roubar uma cor.** O `encodeGif` fazia
+    `palette[0] = [255,0,255]` para marcar a cor transparente — e isso **sobrescreve** a cor
+    que estivesse ali. Num quadro só de sombra a paleta tem UMA cor (o preto), então o preto
+    era apagado e a sombra inteira virava transparente: o GIF saía byte a byte igual ao de um
+    quadro vazio. `reservarTransparente()` agora procura o magenta na paleta e o troca para o
+    índice 0, ou acrescenta uma cor se ele não existir — nunca apaga. O teste é decisivo: a
+    silhueta da sombra codifica **igual** a um quadro preto 100 % opaco.
+23. **A sombra como GIF, não só como folha.** O pedido era um sprite de sombra para usar em
+    jogo, e folha PNG não é o que se põe num `AnimatedSprite2D`. `buildGifs` passou a aceitar
+    qualquer folha na mesma grade, então a da sombra vira um GIF animado por direção
+    (`gif_sombra/` no `.zip`). Ele é sempre transparente — um sprite de sombra com fundo
+    sólido não serve — e sai em silhueta preta por padrão, que é a forma que o motor consegue
+    modular; a opção pontilhada existe para quem prefere a aparência de 35 %.
+24. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
     resposta óbvia — exportar a sheet com e sem sombra — não dá controle nenhum. Sai uma
     terceira imagem, `<nome>_shadow.png`, na mesma grade, obtida num segundo passe com
     `colorWrite = false` nos materiais do modelo (ele continua no passe de sombras, só não
     escreve cor). `metadata.json` ganha `shadow: { file, layout, note }` — `null` quando a
     opção está desligada, para não inventar arquivo. O player tem um checkbox que desenha a
     camada por baixo, então dá para ver o resultado antes de baixar.
-23. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
+25. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
     sombra nenhuma — correto, mas inútil para conferir o resultado. Como GIF não tem alpha
     parcial, a alternativa honesta é o *dithering*: `alphaMask()` com uma matriz de Bayer
     4×4 decide pixel a pixel, e 35 % de alpha vira 37,5 % de pontos opacos (6 de 16, o mais
     perto que a grade chega). Vazio e opaco continuam exatos; só a faixa parcial é
     pontilhada. É o padrão do seletor de fundo do GIF.
-24. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
+26. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
     era 8, então todo pixel semitransparente sobrevivia como opaco: a sombra do chão
     (`ShadowMaterial` a 0,35 = alpha ~89) saía **preta sólida** e a serrilha da borda saía
     com a cor do modelo, formando um halo. Não era a luz — era o formato. Agora o limiar é
@@ -308,7 +342,7 @@ func _ready() -> void:
     de quantizar e o GIF bate com o preview; sem fundo, ela é removida em vez de virar
     mancha. `alphaMask()` existe separado do `encodeGif` justamente para isso ser testável
     sem decodificar GIF.
-25. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
+27. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
     1024 numa célula cujo slider vai até 512. O teto não estava só no HTML: `generate()` lê
     `el.rngCell.value` (o **slider**) em ~20 pontos, então soltar o `max` do campo sozinho não
     mudaria nada — o valor digitado continuaria virando 512. A solução foi o campo **ampliar o
@@ -319,13 +353,13 @@ func _ready() -> void:
     `applySettings`, senão um preset salvo com 1024 era podado ao carregar. Célula grande não
     quebra nada: `computeLayout` já reduz a célula para caber em 8192 px e avisa na barra de
     status (1024 com 8×12 → 682 px).
-26. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
+28. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
     barra do Windows caía em cima das caixinhas de número. Agora ele reserva o vão de uma vez
     (`scrollbar-gutter:stable`), usa barra fina e os campos têm largura fixa de 66 px.
-27. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
+29. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
     clamp na faixa do slider e disparando os mesmos handlers — não há um segundo caminho
     de efeito colateral para divergir.
-28. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+30. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 
@@ -353,15 +387,15 @@ node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core
 node tests\spriteforge\test-app-sync.mjs
 ```
 
-`test-app-sync.mjs` (**17 asserções**) cobre a outra ponta — os campos digitados. Como não há
+`test-app-sync.mjs` (**23 asserções**) cobre a outra ponta — os campos digitados. Como não há
 como abrir um navegador aqui, ele executa o **bloco real** do `app.js`, extraído do arquivo
 pelo texto, contra um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe
 no passo). Confirma que digitar 1024 na célula chega até o slider — que é o que `generate()`
 lê —, que ângulos continuam limitados, que o mínimo continua valendo e que digitar não é
-sobrescrito no meio do número. Entra no `validate --full`; **não** está no CI, porque o
-workflow só chama o núcleo.
+sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
+no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**198 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**209 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a
