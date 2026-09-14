@@ -704,13 +704,28 @@ node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core
 node tests\spriteforge\test-app-sync.mjs
 ```
 
-`test-app-sync.mjs` (**33 asserções**) cobre a outra ponta — os campos digitados. Como não há
-como abrir um navegador aqui, ele executa o **bloco real** do `app.js`, extraído do arquivo
-pelo texto, contra um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe
-no passo). Confirma que digitar 1024 na célula chega até o slider — que é o que `generate()`
-lê —, que ângulos continuam limitados, que o mínimo continua valendo e que digitar não é
-sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
-no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
+`test-app-sync.mjs` (**58 asserções**) cobre a outra ponta — o que mora no `app.js` e não no
+núcleo. Como não há como abrir um navegador aqui, ele executa o **bloco real** do `app.js`,
+extraído do arquivo pelo texto (com balanceamento de chaves, não por `indexOf` de `}`), contra
+um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe no passo).
+
+Confirma que digitar 1024 na célula chega até o slider — que é o que `generate()` lê —, que
+ângulos continuam limitados, que o mínimo continua valendo, que digitar não é sobrescrito no
+meio do número e que cada modo de GIF sai com o corte de alpha certo. E também três coisas
+que só aparecem no navegador:
+
+- **a sombra separada é opaca** — o passe força `ground.material.opacity = 1` e devolve o valor
+  depois, e `composeSheetWithShadow` recompõe a sombra a `SOMBRA_OPACIDADE` antes de desenhar o
+  personagem com alpha 1 de volta;
+- **`pastaPara` pede permissão no clique** (`pedir=true`) em vez de devolver `null` e deixar o
+  arquivo cair em downloads depois de reabrir o navegador;
+- **o seletor de pasta não abre duas vezes** — dois cliques seguidos abrem **um** seletor.
+
+Cada um desses três foi verificado **reintroduzindo o bug** e conferindo que a suíte falha.
+Isso pegou um defeito no próprio teste: um `await` que nunca resolve deixa o laço de eventos
+vazio e o Node sai com código 0, então uma suíte travada contava como sucesso. Há um vigia de
+5 s por causa disso. Entra no `validate --full`; **não** está no CI, porque o workflow só
+chama o núcleo.
 
 **378 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre

@@ -77,7 +77,8 @@ const digitarESair = (id, v) => { digitar(id, v); sair(id); };
 const soltar = (r) => el[r].dispatchEvent(new Event('change'));
 
 let fail = 0;
-const ok = (c, m) => { if (!c) { console.log('FALHA:', m); fail++; } else console.log('  ok —', m); };
+let passou = 0;
+const ok = (c, m) => { if (!c) { console.log('FALHA:', m); fail++; } else { passou++; console.log('  ok —', m); } };
 
 digitar('cellVal', '1024'); sair('cellVal');
 ok(el.rngCell.value === '1024', `célula 1024 chega no slider (que o gerador lê): ${el.rngCell.value}`);
@@ -197,8 +198,177 @@ if (linhaGround) {
     'campo vazio não vira evento no relatório (nada aconteceu de fato)');
 }
 
-const total = 33;
-console.log(fail === 0
-  ? `\n${total} passou, 0 falhou — sync slider/campo digitado do app.js`
-  : `\n${total - fail} passou, ${fail} falhou`);
-process.exit(fail === 0 ? 0 : 1);
+/* ---- a sombra separada é opaca; a composta a recompõe a 35% ----
+ * Um relato real de "imagem vazia" veio de uma folha com 1,3 milhão de pixels de
+ * sombra a alpha 89. Estes asserts rodam o código REAL do app.js. */
+function funcaoReal(assinatura) {
+  const ini = src.indexOf(assinatura);
+  if (ini < 0) { console.log('FALHA: não achei ' + assinatura); process.exit(1); }
+  let prof = 0;
+  for (let k = src.indexOf('{', ini); k < src.length; k++) {
+    if (src[k] === '{') prof++;
+    else if (src[k] === '}') { prof--; if (prof === 0) return src.slice(ini, k + 1); }
+  }
+  console.log('FALHA: chave não fecha em ' + assinatura); process.exit(1);
+}
+
+{
+  const opacidadeReal = Number(
+    src.match(/const SOMBRA_OPACIDADE = ([0-9.]+);/)?.[1] ?? NaN
+  );
+  ok(opacidadeReal === 0.35, `SOMBRA_OPACIDADE vale 0,35 (a opacidade da sombra dentro da imagem): ${opacidadeReal}`);
+
+  const desenhos = [];
+  const documento = {
+    createElement: () => {
+      const ctx = {
+        globalAlpha: 1,
+        drawImage(img) { desenhos.push({ img, alpha: this.globalAlpha }); }
+      };
+      const c = { width: 0, height: 0, getContext: () => ctx };
+      return c;
+    }
+  };
+  const composta = new Function(
+    'document', 'SOMBRA_OPACIDADE', funcaoReal('function composeSheetWithShadow(r) {') + '; return composeSheetWithShadow;'
+  )(documento, opacidadeReal);
+
+  const sombra = { nome: 'sombra' }, folha = { nome: 'folha' };
+  const c = composta({ sheet: folha, shadowSheet: sombra, layout: { w: 256, h: 128 } });
+  ok(c.width === 256 && c.height === 128, `a folha composta tem o tamanho do layout: ${c.width}x${c.height}`);
+  ok(desenhos.length === 2, `a composta desenha exatamente duas vezes: ${desenhos.length}`);
+  ok(desenhos[0].img === sombra, 'desenha a sombra PRIMEIRO (fica por baixo do personagem)');
+  ok(desenhos[0].alpha === opacidadeReal,
+    `a sombra é recomposta a ${opacidadeReal} na composta — sem isto ela dobraria de força, já que o PNG agora é opaco`);
+  ok(desenhos[1].img === folha, 'desenha o personagem por cima');
+  ok(desenhos[1].alpha === 1,
+    `o personagem volta ao alpha 1 depois da sombra: ${desenhos[1].alpha} (esquecer isto desbotaria o sprite inteiro)`);
+}
+
+/* ---- o passe da sombra renderiza opaco e devolve a opacidade depois ---- */
+{
+  const linha = (trecho) => {
+    const l = src.split('\n').find((x) => x.includes(trecho));
+    if (!l) { console.log('FALHA: falta a linha ' + trecho); process.exit(1); }
+    return l.trim();
+  };
+  const guardar = linha('const opacidadeAntes = ground.material.opacity;');
+  const forcarOpaco = linha('ground.material.opacity = 1;');
+  const devolver = linha('ground.material.opacity = opacidadeAntes;');
+
+  const ground = { material: { opacity: 0.35 } };
+  const passos = [];
+  const ctxReal = new Function('ground', 'passos', [
+    guardar, 'passos.push(ground.material.opacity);',
+    forcarOpaco, 'passos.push(ground.material.opacity);',
+    devolver, 'passos.push(ground.material.opacity);',
+    'return ground.material.opacity;'
+  ].join('\n'));
+  const final = ctxReal(ground, passos);
+
+  ok(passos[1] === 1,
+    `durante o passe da sombra o chão é OPACO (opacity 1) — é isto que faz o PNG sair preto sólido: ${passos[1]}`);
+  ok(final === 0.35,
+    `a opacidade volta ao valor de antes depois do passe: ${final} (senão o personagem também sairia com sombra opaca)`);
+  ok(passos[0] === 0.35, `e o valor guardado é mesmo o do preview: ${passos[0]}`);
+}
+
+/* ---- pastaPara pede permissão no clique em vez de cair em download ---- */
+async function testarPastaPara() {
+  const pedidas = [];
+  const pastaStub = {
+    permissaoOk(handle, pedir) { pedidas.push([handle.name, pedir]); return Promise.resolve(true); }
+  };
+  const rotulos = [];
+  const saidaStub = { pasta: { name: 'saida', getDirectoryHandle: (n, o) => Promise.resolve({ name: n, criado: !!o?.create }) }, permissao: false };
+  const fn = new Function('saida', 'pasta', 'atualizarRotuloPasta',
+    funcaoReal('async function pastaPara(tipo) {') + '; return pastaPara;')(saidaStub, pastaStub, () => rotulos.push(1));
+
+  {
+    const dir = await fn('projetos');
+    ok(pedidas.length === 1 && pedidas[0][1] === true,
+      `permissão sem gesto guardado -> PEDIU de novo (pedir=true): ${JSON.stringify(pedidas[0])}`);
+    ok(saidaStub.permissao === true, 'e a permissão concedida fica guardada para os próximos exports');
+    ok(rotulos.length === 1, 'o rótulo da pasta na interface é atualizado depois de pedir');
+    ok(dir && dir.name === 'projetos' && dir.criado === true,
+      `a subpasta "projetos" é criada dentro da pasta escolhida: ${dir && dir.name}`);
+  }
+
+  // recusou a permissão -> volta null, sem inventar caminho
+  const saidaSem = { pasta: { name: 'saida', getDirectoryHandle: () => Promise.resolve(null) }, permissao: false };
+  const pastaNega = { permissaoOk: () => Promise.resolve(false) };
+  const fn2 = new Function('saida', 'pasta', 'atualizarRotuloPasta',
+    funcaoReal('async function pastaPara(tipo) {') + '; return pastaPara;')(saidaSem, pastaNega, () => {});
+  ok((await fn2('projetos')) === null,
+    'permissão negada -> null (aí sim cai em download, e o aviso diz isso)');
+
+  // sem pasta escolhida, nem pergunta
+  const fn3 = new Function('saida', 'pasta', 'atualizarRotuloPasta',
+    funcaoReal('async function pastaPara(tipo) {') + '; return pastaPara;')({ pasta: null, permissao: false }, pastaStub, () => {});
+  const antes = pedidas.length;
+  ok((await fn3('saida')) === null && pedidas.length === antes,
+    'sem pasta escolhida não pergunta nada, só devolve null');
+}
+
+/* ---- o seletor de pasta não abre duas vezes ---- */
+async function testarSeletor() {
+  let aberturas = 0;
+  const estados = [];
+  const resolucoes = [];
+  const pastaLento = {
+    apiDisponivel: () => true,
+    // Guarda TODAS as resoluções: se a guarda de reentrada falhar, abre mais de um
+    // seletor e liberar só o último deixaria o primeiro pendurado para sempre.
+    escolherPasta: () => { aberturas++; return new Promise((r) => resolucoes.push(r)); },
+    permissaoOk: () => Promise.resolve(true),
+    guardarPasta: () => Promise.resolve(),
+    esquecerPasta: () => Promise.resolve()
+  };
+  const saidaG = { pasta: null, permissao: false, escolhendo: false };
+  const abrir = new Function('saida', 'pasta', 'setStatus', 't', 'gravador', 'gravarSessao', 'atualizarRotuloPasta',
+    funcaoReal('async function escolherPastaSaida() {') + '; return escolherPastaSaida;')(
+    saidaG, pastaLento,
+    (msg, tipo) => estados.push([msg, tipo]),
+    (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null ? vars[k] : `{${k}}`)),
+    { registrar() {} }, () => {}, () => {}
+  );
+
+  const primeiro = abrir();
+  const segundo = abrir();
+  // Só libera DEPOIS dos dois cliques: o ponto do teste é que o segundo encontre
+  // o primeiro ainda aberto. Liberar antes deixaria o flag já abaixado e o teste
+  // passaria sem provar nada.
+  ok(saidaG.escolhendo === true, 'o flag sobe assim que o seletor abre');
+  ok(estados.length === 1, `o segundo clique avisa em vez de abrir outro seletor: ${estados.length} aviso`);
+  for (const r of resolucoes) r(null);  // o usuário cancela o seletor
+  await Promise.all([primeiro, segundo]);
+  {
+    ok(aberturas === 1,
+      `clicar de novo com o seletor aberto NÃO abre outro (aberturas=${aberturas}) — era isto que gerava "File picker already active"`);
+    ok(estados.some(([m, tipo]) => tipo === 'err' && m.includes('já está aberto')),
+      `e o usuário fica sabendo por quê: "${estados[estados.length - 1][0]}"`);
+  }
+  ok(saidaG.escolhendo === false, 'cancelar o seletor libera o flag para tentar de novo');
+}
+
+// Os dois blocos acima são async (pastaPara e o seletor pedem permissão de
+// verdade), então a contagem precisa esperar por eles — senão os asserts
+// rodavam DEPOIS do process.exit e não contavam.
+//
+// O vigia existe porque um await que nunca resolve deixa o laço de eventos vazio
+// e o Node sai com código 0: um teste travado contava como sucesso. Verificado
+// de propósito, desligando a guarda do seletor.
+const vigia = setTimeout(() => {
+  console.log('\nFALHA: o teste travou — alguma promessa não resolveu');
+  process.exit(1);
+}, 5000);
+
+(async () => {
+  await testarPastaPara();
+  await testarSeletor();
+  clearTimeout(vigia);
+  console.log(fail === 0
+    ? `\n${passou} passou, 0 falhou — sync slider/campo digitado do app.js`
+    : `\n${passou} passou, ${fail} falhou`);
+  process.exit(fail === 0 ? 0 : 1);
+})();
