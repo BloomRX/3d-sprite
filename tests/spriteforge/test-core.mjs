@@ -816,5 +816,50 @@ ok(await pasta.lerPasta() === null, 'sem IndexedDB lerPasta devolve null');
 ok(await pasta.guardarPasta({}) === false, 'sem IndexedDB guardarPasta devolve false');
 ok(await pasta.esquecerPasta() === false, 'sem IndexedDB esquecerPasta devolve false');
 
+/* ---------------- censo de alpha (folha vazia) ----------------
+ * "A sombra saiu vazia" é impossível de diagnosticar de longe. O censo existe
+ * para a geração dizer na hora se a folha não tem nada. */
+const buf4 = new Uint8ClampedArray(4 * 4 * 4);   // 4×4, tudo transparente
+buf4[3] = 255;                                    // pixel (0,0)
+buf4[(2 * 4 + 3) * 4 + 3] = 89;                   // pixel (3,2) — alpha real da sombra
+const censo = core.alphaCensus(buf4, 4);
+ok(censo.visiveis === 2, 'conta os dois pixels com alpha');
+ok(censo.total === 16, 'total é o número de pixels, não de bytes');
+ok(censo.vazio === false, 'folha com pixel não é vazia');
+ok(Math.abs(censo.fracao - 2 / 16) < 1e-9, 'fração é visíveis/total');
+ok(censo.caixa.x === 0 && censo.caixa.y === 0 && censo.caixa.w === 4 && censo.caixa.h === 3,
+  'caixa ocupada cobre de (0,0) a (3,2)');
+const vazio = core.alphaCensus(new Uint8ClampedArray(4 * 4 * 4), 4);
+ok(vazio.vazio === true && vazio.visiveis === 0, 'folha toda transparente é detectada como vazia');
+ok(vazio.caixa === null, 'folha vazia não tem caixa');
+ok(vazio.fracao === 0, 'fração zero na folha vazia');
+// O alpha da sombra é 89 (ShadowMaterial 0.35): precisa contar no censo, senão o
+// diagnóstico diria "vazia" para uma sombra perfeitamente boa.
+const umPixel = new Uint8ClampedArray(4);
+umPixel[3] = 89;
+ok(core.alphaCensus(umPixel, 1).visiveis === 1, 'alpha 89 da sombra conta como visível');
+ok(core.alphaCensus(umPixel, 1, 128).visiveis === 0, 'com corte 128 ele some — é por isso que o GIF precisa ditherizar');
+const corte = new Uint8ClampedArray(2 * 4);
+corte[3] = 10;
+corte[4 + 3] = 200;
+ok(core.alphaCensus(corte, 2, 128).visiveis === 1, 'corte de alpha ignora o pixel fraco');
+ok(core.alphaCensus(corte, 2, 1).visiveis === 2, 'corte 1 conta qualquer alpha não nulo');
+const zero = core.alphaCensus(new Uint8ClampedArray(0), 1);
+ok(zero.total === 0 && zero.fracao === 0, 'buffer vazio não divide por zero (não dá NaN)');
+ok(Number.isNaN(zero.fracao) === false, 'fração é um número mesmo sem pixels');
+// linha inteira: a caixa precisa acompanhar a largura certa
+const linha = new Uint8ClampedArray(5 * 1 * 4);
+linha[3] = 255;
+linha[(4) * 4 + 3] = 255;
+const cLinha = core.alphaCensus(linha, 5);
+ok(cLinha.caixa.w === 5 && cLinha.caixa.h === 1, 'caixa de uma linha de 5px é 5×1');
+// coluna: a aritmética de y precisa estar certa
+const coluna = new Uint8ClampedArray(2 * 4 * 4);   // 2 de largura, 4 de altura
+coluna[3] = 255;                                    // (0,0)
+coluna[(3 * 2 + 0) * 4 + 3] = 255;                  // (0,3)
+const cCol = core.alphaCensus(coluna, 2);
+ok(cCol.caixa.x === 0 && cCol.caixa.y === 0 && cCol.caixa.w === 1 && cCol.caixa.h === 4,
+  'caixa de uma coluna é 1×4 (o y é derivado do índice pela largura)');
+
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

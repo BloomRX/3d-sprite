@@ -985,3 +985,43 @@ export function parseProject(texto) {
     ignoradas
   };
 }
+
+/* ================================================================== *
+ * Censo de alpha — para saber se uma folha saiu vazia
+ * ================================================================== *
+ * "A sombra saiu vazia" é impossível de diagnosticar de longe: pode ser a
+ * luz, o chão fora do enquadramento, a opacidade, ou o export. Contar os
+ * pixels na hora da geração transforma a suposição em número.
+ */
+
+/**
+ * Conta pixels e acha a caixa ocupada de um buffer RGBA.
+ * @param {Uint8ClampedArray|Uint8Array} data - RGBA, 4 bytes por pixel
+ * @param {number} largura
+ * @param {number} [corteAlpha=1] - alpha mínimo para contar como visível
+ * @returns {{visiveis:number, total:number, fracao:number, vazio:boolean,
+ *            caixa:{x:number,y:number,w:number,h:number}|null}}
+ */
+export function alphaCensus(data, largura, corteAlpha = 1) {
+  const total = Math.floor(data.length / 4);
+  let visiveis = 0;
+  let minX = Infinity; let minY = Infinity;
+  let maxX = -Infinity; let maxY = -Infinity;
+  for (let i = 0; i < total; i += 1) {
+    if (data[i * 4 + 3] < corteAlpha) continue;
+    visiveis += 1;
+    const x = i % largura;
+    const y = (i - x) / largura;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return {
+    visiveis,
+    total,
+    fracao: total ? visiveis / total : 0,
+    vazio: visiveis === 0,
+    caixa: visiveis ? { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 } : null
+  };
+}

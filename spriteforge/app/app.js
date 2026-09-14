@@ -1311,6 +1311,23 @@ async function generate() {
       ground.visible = groundAntes;
       applyBackground(background);
       if (state.cancelled) throw new CancelledError();
+
+      // Censo: "a sombra saiu vazia" não dá para diagnosticar de longe — pode ser
+      // a luz, o chão fora do enquadramento, a opacidade ou o export. Contar os
+      // pixels aqui transforma a suposição em número, na hora.
+      const dadosSombra = shctx.getImageData(0, 0, shadowSheet.width, shadowSheet.height).data;
+      const censo = core.alphaCensus(dadosSombra, shadowSheet.width, 1);
+      state.result = state.result || {};
+      gravador.registrar('sombra', censo.vazio
+        ? `camada de sombra VAZIA (0 de ${censo.total} pixels com alpha) — elevação ${elevation}°, pivô ${pivot}, luz azimute ${Number(el.rngLightAz.value) || 0}°, intensidade ${Number(el.rngLightInt.value) || 0}, chão visível=${ground.visible}`
+        : `camada de sombra com ${censo.visiveis}/${censo.total} pixels (${(censo.fracao * 100).toFixed(1)}%), caixa ${censo.caixa.w}×${censo.caixa.h} em (${censo.caixa.x},${censo.caixa.y})`,
+        { ...censo, elevacao: elevation, pivot, luzAz: Number(el.rngLightAz.value) || 0,
+          luzInt: Number(el.rngLightInt.value) || 0, tamanho: shadowSheet.width });
+      if (censo.vazio) {
+        warnings.push(t('a camada de sombra saiu VAZIA — veja o Diagnóstico e me mande o relatório da sessão'));
+        gravador.contarErro();
+      }
+      gravarSessao();
     }
 
     // 6. metadados
