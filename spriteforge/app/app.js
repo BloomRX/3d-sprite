@@ -153,7 +153,14 @@ function collectDiagnostics() {
   push('hardwareConcurrency', navigator.hardwareConcurrency ?? 'n/d');
   push('deviceMemory', navigator.deviceMemory ? `${navigator.deviceMemory} GB` : 'n/d');
   push('devicePixelRatio', window.devicePixelRatio);
-  push('viewport', `${el.viewportWrap?.clientWidth ?? '?'}×${el.viewportWrap?.clientHeight ?? '?'}`);
+  // Com a aba de resultados aberta o painel 3D tem display:none, e clientWidth
+  // é 0 — número real, mas enganoso. Reporta o tamanho do drawing buffer (que
+  // existe sempre) e avisa quando o painel está escondido.
+  const wEl = el.viewportWrap?.clientWidth ?? 0;
+  const hEl = el.viewportWrap?.clientHeight ?? 0;
+  const buffer = renderer ? renderer.getSize(new THREE.Vector2()) : null;
+  push('viewport (CSS)', `${wEl}×${hEl}${wEl === 0 ? ' (painel 3D escondido — abra a aba 3D para medir)' : ''}`);
+  push('viewport (buffer)', buffer ? `${buffer.x}×${buffer.y}` : 'sem renderer');
   for (const [label, r] of [['viewport', renderer], ['sheet', sheetRenderer]]) {
     if (!r) { push(`WebGL (${label})`, 'INDISPONÍVEL'); continue; }
     const gl = r.getContext();
