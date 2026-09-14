@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import * as THREE from '../../spriteforge/app/vendor/three.module.js';
 import * as i18n from '../../spriteforge/app/i18n.js';
 import * as log from '../../spriteforge/app/log.js';
+import * as pasta from '../../spriteforge/app/pasta.js';
 import * as core from '../../spriteforge/app/core.js';
 
 let pass = 0, fail = 0;
@@ -751,6 +752,69 @@ ok(gr4.estado.recursos.gifs === 5, 'recurso válido é preservado');
 const gr5 = log.criarGravador({ agora: () => relogio });
 ok(gr5.estado.eventos.length === 0, 'gravadores são independentes');
 ok(gr5.estado.descartados === 0, 'o contador de descartados não vaza entre gravadores');
+
+/* ---------------- pasta de saída (pasta.js) ----------------
+ * Sem navegador aqui: o que dá para testar são as decisões puras e o
+ * comportamento com handles falsos, que é onde mora a lógica. */
+ok(pasta.nomeSeguro('fox_sheet.png') === 'fox_sheet.png', 'nome comum passa intacto');
+ok(pasta.nomeSeguro('a/b\\c:d*e?f"g<h>i|j.png') === 'a_b_c_d_e_f_g_h_i_j.png',
+  'caracteres inválidos no Windows viram "_" (o nome vira arquivo de verdade)');
+ok(pasta.nomeSeguro('') === 'saida', 'nome vazio cai no substituto');
+ok(pasta.nomeSeguro('..') === 'saida', '".." não pode virar nome de arquivo');
+ok(pasta.nomeSeguro('.') === 'saida', '"." não pode virar nome de arquivo');
+ok(pasta.nomeSeguro(null) === 'saida', 'null não quebra o nome');
+ok(pasta.nomeSeguro('x'.repeat(300)).length === 180, 'nome gigante é truncado');
+ok(pasta.nomeSeguro('  fox   sheet.png  ') === 'fox sheet.png', 'espaços sobrando são colapsados');
+ok(pasta.destinoArquivo({ name: 'saida' }, true) === 'pasta', 'pasta escolhida + permissão -> grava na pasta');
+ok(pasta.destinoArquivo({ name: 'saida' }, false) === 'download', 'pasta sem permissão -> download (não perde o arquivo)');
+ok(pasta.destinoArquivo(null, true) === 'download', 'sem pasta -> download');
+ok(pasta.destinoArquivo(null, false) === 'download', 'nem pasta nem permissão -> download');
+ok(pasta.apiDisponivel() === false, 'sem window a API não está disponível (e nada lança)');
+ok(await pasta.permissaoOk(null) === false, 'handle nulo -> sem permissão');
+ok(await pasta.permissaoOk({}) === false, 'handle sem queryPermission -> sem permissão');
+ok(await pasta.permissaoOk({ queryPermission: async () => 'granted' }) === true, 'permissão já concedida');
+const promptPede = { queryPermission: async () => 'prompt', requestPermission: async () => 'granted' };
+ok(await pasta.permissaoOk(promptPede) === true, 'permissão em prompt: pede e consegue');
+let pediu = false;
+const espiao = { queryPermission: async () => 'prompt', requestPermission: async () => { pediu = true; return 'granted'; } };
+ok(await pasta.permissaoOk(espiao, false) === false, 'sem pedir, permissão em prompt devolve false');
+ok(pediu === false, 'e NÃO chama requestPermission — só um gesto do usuário pode pedir');
+ok(await pasta.permissaoOk({ queryPermission: async () => 'prompt', requestPermission: async () => 'denied' }) === false,
+  'usuário negou a permissão -> false');
+// escreverArquivo tem que fechar o fluxo mesmo quando o write falha,
+// senão o arquivo fica travado e a próxima gravação não sai.
+let fechouFeliz = false;
+await pasta.escreverArquivo({
+  getFileHandle: async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => { fechouFeliz = true; } }) })
+}, 'a.png', 'dados');
+ok(fechouFeliz === true, 'fluxo é fechado no caminho feliz');
+let fechouFalha = false;
+let lancou = false;
+try {
+  await pasta.escreverArquivo({
+    getFileHandle: async () => ({
+      createWritable: async () => ({
+        write: async () => { throw new Error('disco cheio'); },
+        close: async () => { fechouFalha = true; }
+      })
+    })
+  }, 'a.png', 'dados');
+} catch { lancou = true; }
+ok(lancou === true, 'falha no write é propagada (quem chama cai no download)');
+ok(fechouFalha === true, 'fluxo é fechado MESMO quando o write falha');
+let criouComCreate = null;
+await pasta.escreverArquivo({
+  getFileHandle: async (nome, opts) => {
+    criouComCreate = { nome, create: opts && opts.create };
+    return { createWritable: async () => ({ write: async () => {}, close: async () => {} }) };
+  }
+}, 'sheet.png', 'x');
+ok(criouComCreate && criouComCreate.nome === 'sheet.png' && criouComCreate.create === true,
+  'o arquivo é pedido com create:true (regenerar sobrescreve, não cria "sheet (1).png")');
+// Sem IndexedDB as três funções devolvem fallback em vez de lançar.
+ok(await pasta.lerPasta() === null, 'sem IndexedDB lerPasta devolve null');
+ok(await pasta.guardarPasta({}) === false, 'sem IndexedDB guardarPasta devolve false');
+ok(await pasta.esquecerPasta() === false, 'sem IndexedDB esquecerPasta devolve false');
 
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

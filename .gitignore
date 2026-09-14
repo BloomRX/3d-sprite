@@ -26,6 +26,11 @@ spriteforge-out/
 projetos/*
 !projetos/LEIA-ME.txt
 
+# Pasta de saída escolhida no app (sheets, GIFs, ZIP, projetos). Se você apontar
+# o app para uma pasta dentro do repositório, nada disso deve ser commitado.
+saida/*
+!saida/LEIA-ME.txt
+
 # Perfil da janela de app (--app): cache, cookies e preferências do navegador
 # embutido. Regenerável, específico da máquina.
 .perfil-app/

@@ -221,6 +221,29 @@ transparência você escolhe no motor (`self_modulate = Color(1,1,1,0.35)` no Go
 alpha no Unity) e ainda pode mudar de cor, esmaecer no pulo, etc. A opção **pontilhada**
 mantém a aparência de 35 % via Bayer 4×4, mas aí a transparência fica queimada na imagem.
 
+## Pasta de saída
+
+Por padrão todo arquivo vai para a **pasta de downloads do navegador** — é o único lugar
+que um site pode escrever sem perguntar. Para os arquivos saírem na pasta do app, clique
+no botão **Pasta de saída: downloads** (no topo) e escolha uma pasta, por exemplo a
+**`saida/`** do repositório.
+
+- A escolha fica salva no navegador (**IndexedDB** — `localStorage` não serve, porque um
+  `FileSystemDirectoryHandle` não vira string).
+- Vale para **tudo**: sheet, `sheet+sombra`, sombra separada, `metadata.json`,
+  `.aseprite.json`, os GIFs, o `.zip`, o projeto e o relatório.
+- **Botão direito** no mesmo botão esquece a pasta e volta aos downloads.
+- Sobrescreve em vez de criar `sheet (1).png`: regenerar a sheet deve substituir a anterior.
+- Sem a API (Firefox, Safari) o botão avisa e tudo continua baixando — nada quebra.
+- Se a gravação na pasta falhar (disco cheio, permissão revogada), o arquivo **não se
+  perde**: cai no download e a barra de status avisa.
+
+Duas limitações do navegador que valem saber: depois de fechar e reabrir o navegador a
+permissão volta a `prompt`, e o navegador só deixa **pedir** permissão a partir de um
+clique — por isso o botão pode aparecer como `Pasta de saída: saida — clique para
+autorizar`. Um clique resolve. E não há como o app escrever na própria pasta sem você
+tê-la escolhido uma vez: o navegador não permite.
+
 ## Salvando um projeto
 
 O painel inteiro pode virar um arquivo **`.spriteforge.json`** (botões **Salvar projeto**
@@ -572,7 +595,18 @@ func _ready() -> void:
     salvar) e o conteúdo dele nunca entra num commit. O perfil da janela de app
     (`.perfil-app/`) também é ignorado — é cache regenerável, específico da máquina.
 
-44. **O relatório lista o que NÃO foi usado.** Um log comum responde "o que aconteceu";
+44. **A pasta de saída decide no `downloadBlob`, não em cada botão.** Os nove pontos de
+    exportação (sheet, sombra, composta, JSON, Aseprite, GIFs, ZIP, projeto, relatório)
+    passam todos pelo mesmo lugar, então não há como um deles esquecer de respeitar a
+    pasta. O handle fica no **IndexedDB**, porque `localStorage` só guarda string e um
+    `FileSystemDirectoryHandle` é objeto. Se a gravação falhar o arquivo cai no download
+    em vez de sumir — perder export é pior do que salvar no lugar errado.
+45. **`no-shadow` ligado depois de um bug real.** Um stream de arquivo chamado
+    `gravador` sombreou o gravador de sessão: `.write()` e `.close()` funcionavam (o
+    stream tem os dois) e `.marcar()` estourava no fim — o projeto era salvo **e** ainda
+    baixava uma segunda cópia. A regra agora é `error`, e reintroduzir o padrão faz o
+    lint falhar (verificado). É o tipo de erro que teste nenhum pegaria por acaso.
+46. **O relatório lista o que NÃO foi usado.** Um log comum responde "o que aconteceu";
     aqui a metade mais útil é a outra — os recursos que a sessão inteira não tocou, que
     são exatamente os que continuam sem verificação. Por isso `log.js` mantém um
     inventário fixo de 24 recursos e o relatório imprime os dois lados. O módulo é puro
@@ -613,7 +647,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**335 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**362 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

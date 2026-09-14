@@ -13,6 +13,7 @@ import { zipSync, strToU8 } from './libs/fflate.module.js';
 import * as core from './core.js';
 import { aplicarIdioma, t, idiomaAtual } from './i18n.js';
 import { criarGravador } from './log.js';
+import * as pasta from './pasta.js';
 
 /* ================================================================== *
  * 0. Referências de DOM e estado
@@ -23,6 +24,7 @@ const el = {
   btnSampleStatic: $('btnSampleStatic'),
   btnSaveProject: $('btnSaveProject'), btnOpenProject: $('btnOpenProject'), projectInput: $('projectInput'),
   btnLogTxt: $('btnLogTxt'), btnLogJson: $('btnLogJson'), btnLogLimpar: $('btnLogLimpar'), logCount: $('logCount'),
+  btnPastaSaida: $('btnPastaSaida'),
   btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
   tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
@@ -987,6 +989,13 @@ el.btnLogLimpar.addEventListener('click', () => {
   setStatus(t('sessão limpa'), 'ok');
 });
 
+el.btnPastaSaida.addEventListener('click', () => { escolherPastaSaida(); });
+el.btnPastaSaida.addEventListener('contextmenu', (e) => {
+  if (!saida.pasta) return;          // sem pasta ativa, deixa o menu normal
+  e.preventDefault();
+  esquecerPastaSaida();
+});
+
 el.btnDiag.addEventListener('click', () => {
   gravador.marcar('diagnostico');
   atualizarContagemLog();
@@ -1501,7 +1510,74 @@ el.btnPlayerPlay.addEventListener('click', () => {
 /* ================================================================== *
  * 9. Downloads: PNG, metadata.json, sidecar Aseprite e GIF por direção
  * ================================================================== */
-function downloadBlob(blob, filename) {
+/* ---- pasta de saída ----
+ * Sem isto todo arquivo cai na pasta de downloads do navegador. O usuário
+ * escolhe a pasta UMA vez; o handle fica no IndexedDB (localStorage não guarda
+ * FileSystemDirectoryHandle). Sem a API — Firefox, Safari — segue o download. */
+const saida = { pasta: null, permissao: false };
+async function restaurarPastaSaida() {
+  saida.pasta = await pasta.lerPasta();
+  // Sem gesto do usuário o navegador não deixa PEDIR permissão, só consultar.
+  saida.permissao = await pasta.permissaoOk(saida.pasta, false);
+  atualizarRotuloPasta();
+}
+function atualizarRotuloPasta() {
+  if (!el.btnPastaSaida) return;
+  if (!saida.pasta) {
+    el.btnPastaSaida.textContent = t('Pasta de saída: downloads');
+    el.btnPastaSaida.title = t('Os arquivos vão para a pasta de downloads do navegador. Clique para escolher uma pasta (por exemplo a pasta do app).');
+    return;
+  }
+  const falta = saida.permissao ? '' : t(' — clique para autorizar');
+  el.btnPastaSaida.textContent = t('Pasta de saída: {nome}', { nome: saida.pasta.name }) + falta;
+  el.btnPastaSaida.title = t('Os arquivos saem em "{nome}". Clique para trocar ou esquecer.', { nome: saida.pasta.name });
+}
+async function escolherPastaSaida() {
+  if (!pasta.apiDisponivel()) {
+    setStatus(t('este navegador não deixa escolher pasta de saída (Firefox/Safari) — os arquivos continuam indo para downloads'), 'err');
+    return;
+  }
+  const dir = await pasta.escolherPasta();
+  if (!dir) return;                                  // cancelou
+  saida.pasta = dir;
+  saida.permissao = await pasta.permissaoOk(dir, true);
+  await pasta.guardarPasta(dir);
+  gravador.registrar('saida', `pasta de saída -> ${dir.name}${saida.permissao ? '' : ' (sem permissão)'}`);
+  gravarSessao();
+  atualizarRotuloPasta();
+  setStatus(saida.permissao
+    ? t('arquivos agora saem na pasta "{nome}"', { nome: dir.name })
+    : t('pasta "{nome}" escolhida, mas a permissão de escrita foi negada — vai continuar baixando', { nome: dir.name }),
+    saida.permissao ? 'ok' : 'err');
+}
+async function esquecerPastaSaida() {
+  saida.pasta = null;
+  saida.permissao = false;
+  await pasta.esquecerPasta();
+  gravador.registrar('saida', 'pasta de saída esquecida — voltou para downloads');
+  atualizarRotuloPasta();
+  setStatus(t('pasta de saída esquecida — voltou para a pasta de downloads'), 'ok');
+}
+
+/**
+ * Roteia TODO download: pasta escolhida com permissão -> grava lá; senão, baixa.
+ * Fazer isso aqui, e não em cada botão, é o que garante que sheet, JSON,
+ * Aseprite, sombra, GIFs, ZIP, projeto e relatório se comportem iguais.
+ */
+async function downloadBlob(blob, filename) {
+  const nome = pasta.nomeSeguro(filename);
+  if (saida.pasta && saida.permissao) {
+    try {
+      await pasta.escreverArquivo(saida.pasta, nome, blob);
+      gravador.registrar('saida', `${nome} -> pasta ${saida.pasta.name}`);
+      gravarSessao();
+      return;
+    } catch (err) {
+      // Não perde o arquivo: cai no download e avisa.
+      gravador.registrar('erro', `não consegui gravar ${nome} na pasta (${err && err.message ? err.message : err}) — baixando`);
+      setStatus(t('não consegui gravar na pasta ({msg}) — baixei em vez disso', { msg: err && err.message ? err.message : err }), 'err');
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1671,8 +1747,19 @@ function montarGifs(gifs, sufixo, rotulo) {
     link.href = url;
     link.download = `${base}_dir${String(dir).padStart(2, '0')}${sufixo}.gif`;
     link.textContent = 'baixar';
-    // O download é um <a download>, então o gancho vai no clique do link.
-    link.addEventListener('click', () => { gravador.marcar('dlGif'); gravador.contarDownload(); gravarSessao(); });
+    // O download é um <a download>, que não sabe escrever em pasta: com a pasta
+    // de saída ativa o clique é interceptado e o arquivo é gravado lá. Sem pasta,
+    // o comportamento padrão do link continua valendo.
+    const nomeGif = link.download;
+    const blobGif = new Blob([bytes], { type: 'image/gif' });
+    link.addEventListener('click', (e) => {
+      gravador.marcar('dlGif');
+      gravador.contarDownload();
+      gravarSessao();
+      if (!(saida.pasta && saida.permissao)) return;
+      e.preventDefault();
+      downloadBlob(blobGif, nomeGif);
+    });
     fig.append(img, cap, link);
     el.gifList.appendChild(fig);
   }
@@ -1840,3 +1927,4 @@ else {
 gravador.registrar('sessao', `sessão iniciada — ${location.protocol === 'file:' ? 'file:// (não funciona)' : location.origin}`);
 gravarSessao();
 atualizarContagemLog();
+restaurarPastaSaida();

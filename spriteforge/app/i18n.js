@@ -291,6 +291,24 @@ const EN = {
   'relatório baixado (.json)': 'report downloaded (.json)',
   'relatório da sessão baixado ({n} eventos)': 'session report downloaded ({n} events)',
   'sessão limpa': 'session cleared',
+
+  /* ---- pasta de saída ---- */
+  'Pasta de saída: downloads': 'Output folder: downloads',
+  'Pasta de saída: {nome}': 'Output folder: {nome}',
+  ' — clique para autorizar': ' — click to authorize',
+  'Os arquivos vão para a pasta de downloads do navegador. Clique para escolher uma pasta (por exemplo a pasta do app).':
+    'Files go to the browser downloads folder. Click to pick a folder (for example the app folder).',
+  'Os arquivos saem em "{nome}". Clique para trocar ou esquecer.':
+    'Files are written to "{nome}". Click to change it, right-click to forget it.',
+  'arquivos agora saem na pasta "{nome}"': 'files now go to the "{nome}" folder',
+  'pasta "{nome}" escolhida, mas a permissão de escrita foi negada — vai continuar baixando':
+    'folder "{nome}" picked, but write permission was denied — it will keep downloading',
+  'pasta de saída esquecida — voltou para a pasta de downloads':
+    'output folder forgotten — back to the downloads folder',
+  'este navegador não deixa escolher pasta de saída (Firefox/Safari) — os arquivos continuam indo para downloads':
+    'this browser cannot pick an output folder (Firefox/Safari) — files keep going to downloads',
+  'não consegui gravar na pasta ({msg}) — baixei em vez disso':
+    "couldn't write to the folder ({msg}) — downloaded it instead",
 };
 
 let atual = 'pt-BR';

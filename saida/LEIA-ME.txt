@@ -1,0 +1,9 @@
+Pasta de saída sugerida do SpriteForge.
+
+No app, clique em "Pasta de saída: downloads" (no topo) e escolha ESTA pasta.
+A partir daí sheet, GIFs, ZIP, metadata e projetos saem aqui, em vez da pasta
+de downloads do navegador. A escolha fica salva no navegador.
+
+Para voltar aos downloads: botão direito nesse mesmo botão.
+
+O conteúdo desta pasta está no .gitignore — só este LEIA-ME é versionado.
