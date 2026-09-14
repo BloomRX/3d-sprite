@@ -1565,7 +1565,7 @@ el.btnPlayerPlay.addEventListener('click', () => {
  * Sem isto todo arquivo cai na pasta de downloads do navegador. O usuário
  * escolhe a pasta UMA vez; o handle fica no IndexedDB (localStorage não guarda
  * FileSystemDirectoryHandle). Sem a API — Firefox, Safari — segue o download. */
-const saida = { pasta: null, permissao: false };
+const saida = { pasta: null, permissao: false, escolhendo: false };
 async function restaurarPastaSaida() {
   saida.pasta = await pasta.lerPasta();
   // Sem gesto do usuário o navegador não deixa PEDIR permissão, só consultar.
@@ -1588,7 +1588,23 @@ async function escolherPastaSaida() {
     setStatus(t('este navegador não deixa escolher pasta de saída (Firefox/Safari) — os arquivos continuam indo para downloads'), 'err');
     return;
   }
-  const dir = await pasta.escolherPasta();
+  // O Chrome rejeita um segundo seletor enquanto um está aberto
+  // ("File picker already active"), e a rejeição virava erro no relatório.
+  // Clicar de novo porque "nada aconteceu" é justamente o que dispara isso.
+  if (saida.escolhendo) {
+    setStatus(t('o seletor de pasta já está aberto — termine ou cancele ele primeiro'), 'err');
+    return;
+  }
+  saida.escolhendo = true;
+  let dir = null;
+  try {
+    dir = await pasta.escolherPasta();
+  } catch (err) {
+    setStatus(t('não consegui abrir o seletor de pasta ({msg})', { msg: err && err.message ? err.message : err }), 'err');
+    return;
+  } finally {
+    saida.escolhendo = false;
+  }
   if (!dir) return;                                  // cancelou
   saida.pasta = dir;
   saida.permissao = await pasta.permissaoOk(dir, true);
@@ -1632,7 +1648,15 @@ function avisar(msgHtml, { erro = false, ms = 3200 } = {}) {
  * apontou direto para uma pasta que já tem o nome do tipo, não aninha.
  */
 async function pastaPara(tipo) {
-  if (!saida.pasta || !saida.permissao) return null;
+  if (!saida.pasta) return null;
+  // Depois de reabrir o navegador a permissão volta a `prompt`. Quem chama está
+  // num clique, que é gesto válido, então dá para PEDIR aqui — sem isso o
+  // arquivo caía em downloads sem avisar e o usuário achava que não funcionou.
+  if (!saida.permissao) {
+    saida.permissao = await pasta.permissaoOk(saida.pasta, true);
+    atualizarRotuloPasta();
+    if (!saida.permissao) return null;
+  }
   if (saida.pasta.name === tipo) return saida.pasta;
   try {
     return await saida.pasta.getDirectoryHandle(tipo, { create: true });

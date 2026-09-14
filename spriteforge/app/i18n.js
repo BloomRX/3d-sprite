@@ -326,6 +326,9 @@ const EN = {
   'projeto salvo em {pasta}/{nome}': 'project saved to {pasta}/{nome}',
   'a camada de sombra saiu VAZIA — veja o Diagnóstico e me mande o relatório da sessão':
     'the shadow layer came out EMPTY — open Diagnostics and send me the session report',
+  'o seletor de pasta já está aberto — termine ou cancele ele primeiro':
+    'the folder picker is already open — finish or cancel it first',
+  'não consegui abrir o seletor de pasta ({msg})': "couldn't open the folder picker ({msg})",
 };
 
 let atual = 'pt-BR';

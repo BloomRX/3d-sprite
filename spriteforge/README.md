@@ -661,7 +661,19 @@ func _ready() -> void:
     padrão, então o clique parecia não fazer efeito. Todo arquivo que sai agora dispara
     um aviso dizendo o que foi e para onde. Só `setStatus` não bastava: a barra de status
     fica longe dos botões de exportação e é sobrescrita pela mensagem seguinte.
-49. **Censo de pixels na camada de sombra.** "Saiu vazia" é impossível de diagnosticar de
+49. **A camada de sombra separada sai opaca, não a 35%.** Um relato de "imagem vazia"
+    veio de uma folha com 1,3 milhão de pixels de sombra: ela existia, com alpha 89. A
+    camada separada é um sprite que a engine compõe e modula, então pré-aplicar 35% dá
+    atenuação dupla e ainda some em viewer com fundo escuro. Onde a sombra fica dentro da
+    imagem (folha comum e `_com_sombra.png`) os 35% continuam, recompostos na hora a
+    partir de uma constante única.
+50. **Permissão se pede no clique, e o seletor não abre duas vezes.** Depois de reabrir o
+    navegador a permissão de pasta volta a `prompt`; antes disso o arquivo caía em
+    downloads sem avisar, e o usuário concluía que a pasta não funcionava. Quem chama
+    está num clique, que é gesto válido, então a permissão é pedida ali. E o Chrome
+    rejeita um segundo `showDirectoryPicker` com o primeiro aberto — o usuário clicou de
+    novo porque "nada aconteceu", e vieram quatro `File picker already active`.
+51. **Censo de pixels na camada de sombra.** "Saiu vazia" é impossível de diagnosticar de
     longe: luz, chão fora do enquadramento, opacidade e export são causas diferentes com
     correções diferentes. `alphaCensus` conta os pixels na hora da geração e devolve
     visíveis/total/caixa; vazio vira aviso na barra de status **e** número no relatório.
