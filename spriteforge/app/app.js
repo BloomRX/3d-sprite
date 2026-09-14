@@ -24,6 +24,7 @@ const el = {
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
   selDirections: $('selDirections'), rngElevation: $('rngElevation'), elevationVal: $('elevationVal'),
   rngAzimuth: $('rngAzimuth'), azimuthVal: $('azimuthVal'), selPivot: $('selPivot'),
+  rowPivotCustom: $('rowPivotCustom'), pivotXVal: $('pivotXVal'), pivotYVal: $('pivotYVal'),
   rngPadding: $('rngPadding'), paddingVal: $('paddingVal'),
   chkLockScale: $('chkLockScale'), rowScaleLock: $('rowScaleLock'), rngScaleLock: $('rngScaleLock'), scaleLockVal: $('scaleLockVal'),
   rngFrames: $('rngFrames'), framesVal: $('framesVal'),
@@ -35,7 +36,7 @@ const el = {
   btnGenerate: $('btnGenerate'), btnCancel: $('btnCancel'),
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
-  sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
+  sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), chkPivotMark: $('chkPivotMark'), sheetInfo: $('sheetInfo'),
   btnReframe: $('btnReframe'),
   dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlSheetShadow: $('dlSheetShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
@@ -555,6 +556,10 @@ function applySettings(s) {
   setPair('rngElevation', 'elevationVal', s.elevation);
   setPair('rngAzimuth', 'azimuthVal', s.azimuthOffset);
   el.selPivot.value = s.pivot;
+  el.pivotXVal.value = String(s.pivotX ?? 0.5);
+  el.pivotYVal.value = String(s.pivotY ?? 0.5);
+  el.rowPivotCustom.hidden = s.pivot !== 'custom';
+  el.chkPivotMark.checked = s.pivotMark !== false;
   setPair('rngCell', 'cellVal', s.cell);
   setPair('rngPadding', 'paddingVal', s.padding);
   el.chkSsaa.checked = !!s.ssaa;
@@ -589,6 +594,9 @@ function readSettings() {
     elevation: Number(el.rngElevation.value),
     azimuthOffset: Number(el.rngAzimuth.value),
     pivot: el.selPivot.value,
+    pivotX: Number(el.pivotXVal.value),
+    pivotY: Number(el.pivotYVal.value),
+    pivotMark: el.chkPivotMark.checked,
     cell: Number(el.rngCell.value),
     padding: Number(el.rngPadding.value),
     ssaa: el.chkSsaa.checked,
@@ -749,6 +757,7 @@ for (const [rangeKey, numKey] of NUMERIC_PAIRS) {
 // Qualquer ajuste manual invalida a predefinição destacada e vai para a memória.
 const SETTING_CONTROLS = [
   el.selDirections, el.rngFrames, el.rngElevation, el.rngAzimuth, el.selPivot, el.rngCell,
+  el.pivotXVal, el.pivotYVal, el.chkPivotMark,
   el.rngPadding, el.chkSsaa, el.chkLockScale, el.rngScaleLock, el.chkTurntable, el.selBackground,
   el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale, el.selGifBg,
   el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow,
@@ -888,6 +897,8 @@ async function generate() {
   const elevation = Number(el.rngElevation.value);
   const azimuthOffset = Number(el.rngAzimuth.value) || 0;
   const pivot = el.selPivot.value;
+  // O pivot personalizado é clampado no core: fora de 0.07–0.93 o modelo cortaria.
+  const pivotCustom = { x: Number(el.pivotXVal.value), y: Number(el.pivotYVal.value) };
   const padding = Number(el.rngPadding.value) || 0;
   const lockScale = el.chkLockScale.checked;
   const pxPerUnit = Number(el.rngScaleLock.value) || 8;
@@ -933,7 +944,7 @@ async function generate() {
     await yieldToBrowser();
     const fit = core.measureFit(core.fitPoses(poses, { maxFrames: 6, maxDirections: 4 }), applyPose, { elevationDeg: elevation });
     if (!fit) throw new Error('não consegui medir o modelo (geometria vazia?)');
-    const frame = core.frameForPivot(fit.bounds, pivot);
+    const frame = core.frameForPivot(fit.bounds, pivot, core.SCALE_FIX, pivotCustom);
 
     // 3. layout (linhas = direções, colunas = frames) + padding + clamp de 8192 px
     const layout = core.computeLayout(dirCount, times.length, Number(el.rngCell.value), core.MAX_SHEET_SIDE, padding);
@@ -1054,7 +1065,7 @@ async function generate() {
       baseName: `${state.name}_${clip ? clip.name : 'static'}`,
       layout, directionCount: dirCount, elevationDeg: elevation, times, fps,
       loop: el.chkLoopPerfect.checked, ssaa, turntable, background,
-      azimuthOffsetDeg: azimuthOffset, pivot, lockScale, pxPerUnit: lockScale ? pxPerUnit : null,
+      azimuthOffsetDeg: azimuthOffset, pivot, custom: pivotCustom, lockScale, pxPerUnit: lockScale ? pxPerUnit : null,
       shadow: shadowSheet
         ? {
             file: `${state.name}_${clip ? clip.name : 'static'}_shadow.png`,
@@ -1134,8 +1145,33 @@ function drawSheetPreview() {
       }
     }
   }
+  // O "alvo": o ponto que a engine vai usar como âncora, em cada célula.
+  if (el.chkPivotMark.checked) {
+    const p = r.meta.pivot;
+    const raio = Math.max(3, r.layout.cell / 14);
+    ctx.strokeStyle = 'rgba(255,90,160,0.95)';
+    ctx.lineWidth = Math.max(1, r.layout.cell / 96);
+    for (let d = 0; d < r.layout.rows; d++) {
+      for (let f = 0; f < r.layout.cols; f++) {
+        const rect = core.cellRect(r.layout, d, f);
+        const x = rect.x + p.x * rect.w;
+        const y = rect.y + p.y * rect.h;
+        ctx.beginPath();
+        ctx.arc(x, y, raio, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x - raio * 1.9, y); ctx.lineTo(x - raio * 0.5, y);
+        ctx.moveTo(x + raio * 0.5, y); ctx.lineTo(x + raio * 1.9, y);
+        ctx.moveTo(x, y - raio * 1.9); ctx.lineTo(x, y - raio * 0.5);
+        ctx.moveTo(x, y + raio * 0.5); ctx.lineTo(x, y + raio * 1.9);
+        ctx.stroke();
+      }
+    }
+  }
 }
 el.chkGrid.addEventListener('change', drawSheetPreview);
+el.chkPivotMark.addEventListener('change', drawSheetPreview);
+el.selPivot.addEventListener('change', () => { el.rowPivotCustom.hidden = el.selPivot.value !== 'custom'; });
 
 /* ================================================================== *
  * 8. Player (zoom 1–6x, direção, play/pause, fps)

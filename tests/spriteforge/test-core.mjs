@@ -352,6 +352,58 @@ for (let i = 0; i < gifDither.length - 5; i++) if (gifDither[i] === 0x21 && gifD
 ok(transDither === N, `os ${N} quadros do GIF pontilhado continuam transparentes (${transDither})`);
 ok(core.BAYER4.length === 4 && core.BAYER4.every((l) => l.length === 4), 'matriz de Bayer 4x4');
 
+/* ---- pivot personalizado ---- */
+const PIV_MIN = core.PIVOT_MIN, PIV_MAX = core.PIVOT_MAX;
+ok(Math.abs(PIV_MIN - 0.07) < 1e-12 && Math.abs(PIV_MAX - 0.93) < 1e-12, 'faixa do pivot = área útil (0.07..0.93)');
+ok(JSON.stringify(core.clampPivot({ x: 0.5, y: 0.99 })) === JSON.stringify({ x: 0.5, y: PIV_MAX }), 'acima do teto é preso');
+ok(JSON.stringify(core.clampPivot({ x: -3, y: 0 })) === JSON.stringify({ x: PIV_MIN, y: PIV_MIN }), 'abaixo do piso é preso');
+ok(JSON.stringify(core.clampPivot({ x: 'abc', y: null })) === JSON.stringify({ x: 0.5, y: 0.5 }), 'lixo vira centro');
+ok(JSON.stringify(core.pivotPoint('custom', { x: 0.3, y: 0.7 })) === JSON.stringify({ x: 0.3, y: 0.7 }), 'pivotPoint devolve o custom');
+ok(JSON.stringify(core.pivotPoint('base')) === JSON.stringify({ x: 0.5, y: 1 - PIV_MIN }), 'preset base continua igual');
+
+// Box largo e baixo: aqui base/centro/topo DIFEREM (no box alto eles coincidem,
+// o que faria qualquer teste de igualdade passar sem provar nada).
+const largo = { minX: -40, maxX: 40, minY: 0, maxY: 10 };
+const presetas = { center: core.frameForPivot(largo, 'center'), base: core.frameForPivot(largo, 'base'), top: core.frameForPivot(largo, 'top') };
+ok(presetas.base.cy !== presetas.center.cy && presetas.top.cy !== presetas.center.cy,
+  `os três presets diferem neste box (cy ${presetas.top.cy.toFixed(1)} / ${presetas.center.cy.toFixed(1)} / ${presetas.base.cy.toFixed(1)})`);
+for (const [nome, p] of [['center', { x: 0.5, y: 0.5 }], ['base', { x: 0.5, y: 1 - PIV_MIN }], ['top', { x: 0.5, y: PIV_MIN }]]) {
+  const f = core.frameForPivot(largo, 'custom', core.SCALE_FIX, p);
+  ok(Math.abs(f.cx - presetas[nome].cx) < 1e-9 && Math.abs(f.cy - presetas[nome].cy) < 1e-9 && Math.abs(f.half - presetas[nome].half) < 1e-9,
+    `custom (${p.x}, ${p.y.toFixed(2)}) reproduz o preset "${nome}" exatamente`);
+}
+const meio = core.frameForPivot(largo, 'custom', core.SCALE_FIX, { x: 0.5, y: 0.75 });
+ok(meio.cy > presetas.center.cy && meio.cy < presetas.base.cy, 'y=0.75 fica entre centro e base');
+
+// Box alto e estreito: tem folga horizontal, então px desloca de verdade.
+const alto = { minX: -10, maxX: 10, minY: 0, maxY: 40 };
+ok(Math.abs(core.frameForPivot(alto, 'custom', core.SCALE_FIX, { x: 0.5, y: 0.5 }).cx) < 1e-9, 'px=0.5 centraliza');
+ok(core.frameForPivot(alto, 'custom', core.SCALE_FIX, { x: 0.93, y: 0.5 }).cx < -9.9, 'px=0.93 empurra o modelo para a esquerda');
+ok(Math.abs(core.frameForPivot(largo, 'custom', core.SCALE_FIX, { x: 0.6, y: 0.5 }).cx) < 1e-9,
+  'sem folga horizontal px não desloca (mesmo fenômeno já documentado no eixo y)');
+
+// O que importa: em NENHUM pivot o modelo sai da célula.
+let piorNdc = 0;
+for (const bounds of [largo, alto, { minX: -7, maxX: 3, minY: -5, maxY: 22 }, { minX: 0, maxX: 1, minY: 0, maxY: 1 }]) {
+  for (let py = PIV_MIN; py <= PIV_MAX + 1e-9; py += 0.01) {
+    for (const px of [PIV_MIN, 0.25, 0.5, 0.75, PIV_MAX]) {
+      const f = core.frameForPivot(bounds, 'custom', core.SCALE_FIX, { x: px, y: py });
+      piorNdc = Math.max(piorNdc,
+        Math.abs((bounds.minX - f.cx) / f.half), Math.abs((bounds.maxX - f.cx) / f.half),
+        Math.abs((bounds.minY - f.cy) / f.half), Math.abs((bounds.maxY - f.cy) / f.half));
+    }
+  }
+}
+ok(piorNdc <= 1 + 1e-9, `nenhum pivot personalizado corta o modelo (pior NDC ${piorNdc.toFixed(4)} em 4 boxes x 21 x 5)`);
+
+const metaPivot = core.buildMetadata({
+  baseName: 'fox', layout, directionCount: 8, elevationDeg: 18, times: [0],
+  pivot: 'custom', custom: { x: 0.42, y: 0.88 }
+});
+ok(metaPivot.pivot.x === 0.42 && metaPivot.pivot.y === 0.88, 'o pivot personalizado vai para o metadata');
+ok(core.DEFAULT_SETTINGS.pivotX === 0.5 && core.DEFAULT_SETTINGS.pivotY === 0.5 && core.DEFAULT_SETTINGS.pivotMark === true,
+  'defaults: pivot no centro e alvo visível');
+
 /* ---- OrbitControls vendido casa com o three vendido ---- */
 const orbit = await import(new URL('../../spriteforge/app/vendor/OrbitControls.js', import.meta.url));
 ok(typeof orbit.OrbitControls === 'function', 'vendor/OrbitControls.js carrega e exporta a classe');

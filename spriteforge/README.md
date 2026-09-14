@@ -102,7 +102,9 @@ cola tudo para colar num relato de bug.
 | Frames | 1–32 | colunas da sheet; amostras uniformes do clip |
 | Elevação | −10° a 89° | ângulo da câmera acima do horizonte |
 | **Frente em** | 0–359° | gira a convenção de “frente”: muitos modelos olham para +X ou −Z, e sem isso a direção 0 sai de lado |
-| **Pivot** | centro / base / topo | onde a âncora cai na célula; vai para o `metadata.json` e para o Aseprite |
+| **Pivot** | centro / base / topo / **personalizado** | onde a âncora cai na célula; vai para o `metadata.json` e para o Aseprite |
+| **pivot x / y** | 0.07 – 0.93 | aparece ao escolher "personalizado": a posição exata do alvo na célula (y medido do topo). Fora dessa faixa o modelo seria cortado, então o valor é preso nela |
+| **alvo do pivot** | on/off | desenha o **alvo** (círculo + cruz) em cada célula do preview da sheet — é o ponto que a engine usa como âncora |
 | Célula | 16–512 px | lado de cada sprite (a sheet é clampada em 8192 px) |
 | **Padding** | 0–8 px | vão entre as células (contra *bleeding* em atlas mipmapeado) |
 | SSAA 2x | on/off | renderiza em 2× e reduz no `drawImage`. **Desliga sozinho** se `célula×2` passar do `maxTextureSize` da GPU |
@@ -337,7 +339,20 @@ func _ready() -> void:
     cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
     especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
     mesma biblioteca que roda no navegador.
-22. **Órbita no viewport só, nunca na sheet.** O `OrbitControls` (item D3 do spec, o último
+22. **Pivot personalizado é a mesma fórmula dos presets, não um caso à parte.** Os três
+    presets eram `if/else` hardcoded. Dado o pivot na célula (px, py com y do topo), a âncora
+    cai no NDC `ndcX = 2px−1`, `ndcY = 1−2py`, e o ponto do modelo que vira âncora é a fração
+    do bounding box `u = (ndcX/0.86+1)/2`, `t = (ndcY/0.86+1)/2`. Isso reproduz os presets
+    **exatamente** (centro → u=t=0.5; base → t=0 → `cy = minY + 0.86·half`; topo → t=1) e
+    estende para qualquer ponto. A faixa é 0.07–0.93 porque é onde a âncora fica dentro da
+    área útil: o teste varre 4 boxes × 21 valores de y × 5 de x e o pior NDC é 0.86, ou seja,
+    nenhum pivot corta o modelo. Sem folga num eixo, aquele eixo não desloca — é o mesmo
+    comportamento já documentado de "base coincide com centro" em modelo alto.
+23. **O alvo é desenhado no preview, não no 3D.** O pivot é uma propriedade da **célula**, e é
+    na sheet que ele importa: o preview mostra um círculo com cruz em cada célula, no ponto
+    exato que vai no `metadata.json`. Assim dá para conferir a âncora antes de baixar, em vez
+    de descobrir no motor.
+24. **Órbita no viewport só, nunca na sheet.** O `OrbitControls` (item D3 do spec, o último
     que faltava) é ligado à `previewCamera`, enquanto a geração cria a sua própria câmera
     ortográfica a cada pose — girar o modelo com o mouse não tem como vazar para a sheet.
     `framePreview()` seta a posição da câmera diretamente e chama `controls.update()`, que
@@ -345,53 +360,53 @@ func _ready() -> void:
     valendo depois de você orbitar. O módulo veio do tarball oficial do three 0.169.0 e um
     teste garante que ele casa com a build vendida (carrega, instancia, `update()` respeita
     posição externa, `dispose()` não explode).
-23. **Sprite único com sombra real existe — em PNG.** A pergunta era se dava para ter
+25. **Sprite único com sombra real existe — em PNG.** A pergunta era se dava para ter
     "sprite + sombra real com fundo transparente" em vez de só preto/branco. Em **GIF não
     dá**: o formato guarda alpha de 1 bit, então 35 % de opacidade não é representável — não
     é limitação nossa. Em PNG dá, e é o `<nome>_com_sombra.png`: as duas folhas compostas,
     com o alpha de verdade. O `LEIA-ME.txt` do `.zip` agora lista as três entregas da sombra
     e quando usar cada uma.
-24. **Um botão a menos.** "Reset (voltar ao padrão do site)" e o preset **Padrão** executavam
+26. **Um botão a menos.** "Reset (voltar ao padrão do site)" e o preset **Padrão** executavam
     as mesmas três chamadas (`applySettings(default)` + `markPreset('default')` +
     `saveSettings('default')`); só o texto do status mudava. O Reset existia de antes de haver
     o botão **Padrão** — saiu o duplicado, ficou o preset.
-25. **`validate --full` não pode chamar `python3`.** No Windows `python3` não existe: é o
+27. **`validate --full` não pode chamar `python3`.** No Windows `python3` não existe: é o
     alias da Microsoft Store, que responde "Python was not found" e derrubava o comando
     inteiro. `normalize_interpreter()` traduz `python3`/`python`/`py` para o
     `sys.executable` de quem está rodando o script, e o `devkit.json` continua legível.
-26. **A sombra existe numa folha só.** Com a camada separada ligada, o passe do personagem
+28. **A sombra existe numa folha só.** Com a camada separada ligada, o passe do personagem
     renderiza com o chão escondido. Antes ele saía nas duas folhas, e o efeito era exatamente
     o relatado: o toggle "sombra" do player só a escurecia (tirava uma cópia, ficava a outra)
     e o sprite do personagem mantinha a sombra cinza. Como as folhas passaram a ser
     complementares, o GIF do personagem **recompõe** a sombra por baixo quando o fundo pede —
     assim as quatro opções de fundo continuam significando o que dizem, com ou sem camada.
-27. **O índice 0 da paleta não pode roubar uma cor.** O `encodeGif` fazia
+29. **O índice 0 da paleta não pode roubar uma cor.** O `encodeGif` fazia
     `palette[0] = [255,0,255]` para marcar a cor transparente — e isso **sobrescreve** a cor
     que estivesse ali. Num quadro só de sombra a paleta tem UMA cor (o preto), então o preto
     era apagado e a sombra inteira virava transparente: o GIF saía byte a byte igual ao de um
     quadro vazio. `reservarTransparente()` agora procura o magenta na paleta e o troca para o
     índice 0, ou acrescenta uma cor se ele não existir — nunca apaga. O teste é decisivo: a
     silhueta da sombra codifica **igual** a um quadro preto 100 % opaco.
-28. **A sombra como GIF, não só como folha.** O pedido era um sprite de sombra para usar em
+30. **A sombra como GIF, não só como folha.** O pedido era um sprite de sombra para usar em
     jogo, e folha PNG não é o que se põe num `AnimatedSprite2D`. `buildGifs` passou a aceitar
     qualquer folha na mesma grade, então a da sombra vira um GIF animado por direção
     (`gif_sombra/` no `.zip`). Ele é sempre transparente — um sprite de sombra com fundo
     sólido não serve — e sai em silhueta preta por padrão, que é a forma que o motor consegue
     modular; a opção pontilhada existe para quem prefere a aparência de 35 %.
-29. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
+31. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
     resposta óbvia — exportar a sheet com e sem sombra — não dá controle nenhum. Sai uma
     terceira imagem, `<nome>_shadow.png`, na mesma grade, obtida num segundo passe com
     `colorWrite = false` nos materiais do modelo (ele continua no passe de sombras, só não
     escreve cor). `metadata.json` ganha `shadow: { file, layout, note }` — `null` quando a
     opção está desligada, para não inventar arquivo. O player tem um checkbox que desenha a
     camada por baixo, então dá para ver o resultado antes de baixar.
-30. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
+32. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
     sombra nenhuma — correto, mas inútil para conferir o resultado. Como GIF não tem alpha
     parcial, a alternativa honesta é o *dithering*: `alphaMask()` com uma matriz de Bayer
     4×4 decide pixel a pixel, e 35 % de alpha vira 37,5 % de pontos opacos (6 de 16, o mais
     perto que a grade chega). Vazio e opaco continuam exatos; só a faixa parcial é
     pontilhada. É o padrão do seletor de fundo do GIF.
-31. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
+33. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
     era 8, então todo pixel semitransparente sobrevivia como opaco: a sombra do chão
     (`ShadowMaterial` a 0,35 = alpha ~89) saía **preta sólida** e a serrilha da borda saía
     com a cor do modelo, formando um halo. Não era a luz — era o formato. Agora o limiar é
@@ -399,7 +414,7 @@ func _ready() -> void:
     de quantizar e o GIF bate com o preview; sem fundo, ela é removida em vez de virar
     mancha. `alphaMask()` existe separado do `encodeGif` justamente para isso ser testável
     sem decodificar GIF.
-32. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
+34. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
     1024 numa célula cujo slider vai até 512. O teto não estava só no HTML: `generate()` lê
     `el.rngCell.value` (o **slider**) em ~20 pontos, então soltar o `max` do campo sozinho não
     mudaria nada — o valor digitado continuaria virando 512. A solução foi o campo **ampliar o
@@ -410,13 +425,13 @@ func _ready() -> void:
     `applySettings`, senão um preset salvo com 1024 era podado ao carregar. Célula grande não
     quebra nada: `computeLayout` já reduz a célula para caber em 8192 px e avisa na barra de
     status (1024 com 8×12 → 682 px).
-33. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
+35. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
     barra do Windows caía em cima das caixinhas de número. Agora ele reserva o vão de uma vez
     (`scrollbar-gutter:stable`), usa barra fina e os campos têm largura fixa de 66 px.
-34. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
+36. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
     clamp na faixa do slider e disparando os mesmos handlers — não há um segundo caminho
     de efeito colateral para divergir.
-35. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+37. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 
@@ -452,7 +467,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**214 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**231 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

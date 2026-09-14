@@ -84,6 +84,7 @@ export const DEFAULT_SETTINGS = {
   cell: 128, padding: 0, ssaa: false, lockScale: false, pxPerUnit: 8,
   turntable: false, background: 'transparent', shadow: true,
   lightCamera: false, lightAz: 34, lightIntensity: 2.6,
+  pivotX: 0.5, pivotY: 0.5, pivotMark: true,
   loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'dither',
   shadowLayer: true, playerShadow: true, shadowGif: 'silhueta'
 };
@@ -130,9 +131,26 @@ export function pxPerUnitToFit(cell, half) {
 }
 
 /** Pivot normalizado (0..1) dentro da célula, no formato que as engines usam. */
-export function pivotPoint(pivot) {
+/** Faixa em que um pivot personalizado pode ficar sem cortar o modelo.
+ *  Vem do SCALE_FIX: a âncora encosta em ±0.86 do NDC, ou seja, 7 % da borda. */
+export const PIVOT_MIN = PIVOT_MARGIN;
+export const PIVOT_MAX = 1 - PIVOT_MARGIN;
+
+/** Prende um pivot personalizado na área útil (fora dela o modelo seria cortado). */
+export function clampPivot(p) {
+  // Number(null) é 0 e Number('') é 0 — os dois passariam no isFinite e virariam
+  // 0.07 em vez do centro. Ausência tem que cair no padrão, não no piso.
+  const num = (v, d) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
+  const c = (v) => Math.min(PIVOT_MAX, Math.max(PIVOT_MIN, v));
+  return { x: c(num(p && p.x, 0.5)), y: c(num(p && p.y, 0.5)) };
+}
+
+/** Posição do pivot dentro da célula, normalizada (y medido do TOPO).
+ *  É o que vai no metadata.json e o que a engine usa para alinhar. */
+export function pivotPoint(pivot, custom = null) {
   if (pivot === 'base') return { x: 0.5, y: 1 - PIVOT_MARGIN };
   if (pivot === 'top') return { x: 0.5, y: PIVOT_MARGIN };
+  if (pivot === 'custom') return clampPivot(custom);
   return { x: 0.5, y: 0.5 };
 }
 
@@ -277,24 +295,43 @@ export function createOrthoCamera({ half, center, elevationDeg, azimuthRad = 0, 
  *  base   → a base encosta na borda de baixo (pés de personagem no chão);
  *  top    → o topo encosta na borda de cima (itens pendurados, HUD).
  */
-export function frameForPivot(bounds, pivot = 'center', scaleFix = SCALE_FIX) {
+/** Enquadramento para um pivot — centro, base, topo OU um ponto personalizado.
+ *
+ *  Os três presets são casos particulares de UMA fórmula. Dado o pivot na célula
+ *  (px, py com y medido do topo), a âncora do modelo cai no NDC
+ *      ndcX = 2·px − 1        ndcY = 1 − 2·py
+ *  e o ponto do modelo que vira âncora é a fração do bounding box
+ *      u = (ndcX/scaleFix + 1)/2      t = (ndcY/scaleFix + 1)/2
+ *  (0 = borda esquerda/inferior, 1 = direita/superior). Daí
+ *      cx = minX + u·(maxX−minX) − half·ndcX
+ *      cy = minY + t·(maxY−minY) − half·ndcY
+ *  Conferindo os presets: centro (0.5, 0.5) → u=t=0.5 → centro do box;
+ *  base (0.5, 0.93) → t=0 → cy = minY + scaleFix·half; topo → t=1 →
+ *  cy = maxY − scaleFix·half. Idêntico ao que estava hardcoded.
+ *
+ *  Como a âncora é sempre uma fração do próprio bounding box, ela encosta em
+ *  ±scaleFix no extremo e o modelo continua inteiro dentro da célula — é por
+ *  isso que o pivot personalizado é limitado a [0.07, 0.93]: além disso a
+ *  âncora sairia da área útil e o modelo seria cortado.
+ */
+export function frameForPivot(bounds, pivot = 'center', scaleFix = SCALE_FIX, custom = null) {
   const { minX, maxX, minY, maxY } = bounds;
-  const cx = (minX + maxX) / 2;
+  const cxCentro = (minX + maxX) / 2;
   const cyMid = (minY + maxY) / 2;
   // O half é sempre o do enquadramento CENTRADO: é o menor valor que não corta
   // nada. Redimensionar por pivot (a tentação óbvia) jogaria o modelo para fora.
   const half = Math.max(
-    Math.abs(minX - cx), Math.abs(maxX - cx),
+    Math.abs(minX - cxCentro), Math.abs(maxX - cxCentro),
     Math.abs(minY - cyMid), Math.abs(maxY - cyMid)
   ) / scaleFix;
-  // Aí o alvo desliza até encostar a âncora na borda útil (±scaleFix), usando a
-  // folga que existir. Quando a altura do modelo é o que limita o half, não há
-  // folga vertical e "base" coincide com "center" — é o resultado correto, não
-  // uma falha: numa célula quadrada não dá para ancorar no pé e manter o topo.
-  let cy = cyMid;
-  if (pivot === 'base') cy = minY + scaleFix * half;
-  else if (pivot === 'top') cy = maxY - scaleFix * half;
-  return { cx, cy, half, pivot };
+  const p = pivotPoint(pivot, custom);
+  const ndcX = 2 * p.x - 1;
+  const ndcY = 1 - 2 * p.y;
+  const u = (ndcX / scaleFix + 1) / 2;
+  const t = (ndcY / scaleFix + 1) / 2;
+  const cx = minX + u * (maxX - minX) - half * ndcX;
+  const cy = minY + t * (maxY - minY) - half * ndcY;
+  return { cx, cy, half, pivot, pivotPoint: p };
 }
 
 /**
@@ -458,6 +495,7 @@ export function buildMetadata({
   background = 'transparent',
   azimuthOffsetDeg = 0,
   pivot = 'center',
+  custom = null,
   lockScale = false,
   pxPerUnit = null,
   shadow = null
@@ -486,7 +524,7 @@ export function buildMetadata({
     grid: { cols: layout.cols, rows: layout.rows },
     // Pivot normalizado (0..1) dentro da célula: é o que as engines usam para
     // posicionar o sprite (Godot: offset; Unity: pivot do Sprite).
-    pivot: pivotPoint(pivot),
+    pivot: pivotPoint(pivot, custom),
     directions: {
       count: directionCount,
       layout: 'row-per-direction',
