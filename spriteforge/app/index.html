@@ -202,6 +202,16 @@
   </div>
   <div id="diagBody">—</div>
   <div class="hint">Cole isto aqui se algo falhar: ele diz o que a GPU suporta e qual foi o último erro.</div>
+  <div class="row wrap" style="margin-top:8px">
+    <strong style="flex:1">Relatório da sessão</strong>
+    <span class="hint" id="logCount">—</span>
+  </div>
+  <div class="row wrap">
+    <button id="btnLogTxt" class="mini" title="Relatório legível: ambiente, linha do tempo e o que você não chegou a usar">baixar .txt</button>
+    <button id="btnLogJson" class="mini" title="Os mesmos dados em JSON, para analisar">baixar .json</button>
+    <button id="btnLogLimpar" class="mini" title="Apaga a sessão gravada e começa do zero">limpar</button>
+  </div>
+  <div class="hint">Lista cada ação em ordem, quanto tempo levou, e <b>o que nunca foi usado</b> — é isso que mostra o que ainda falta testar. A sessão sobrevive a recarregar a página.</div>
 </div>
 
 <main>

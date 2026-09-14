@@ -12,6 +12,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { zipSync, strToU8 } from './libs/fflate.module.js';
 import * as core from './core.js';
 import { aplicarIdioma, t, idiomaAtual } from './i18n.js';
+import { criarGravador } from './log.js';
 
 /* ================================================================== *
  * 0. Referências de DOM e estado
@@ -21,6 +22,7 @@ const el = {
   fileInput: $('fileInput'), btnOpen: $('btnOpen'), btnSample: $('btnSample'), modelInfo: $('modelInfo'),
   btnSampleStatic: $('btnSampleStatic'),
   btnSaveProject: $('btnSaveProject'), btnOpenProject: $('btnOpenProject'), projectInput: $('projectInput'),
+  btnLogTxt: $('btnLogTxt'), btnLogJson: $('btnLogJson'), btnLogLimpar: $('btnLogLimpar'), logCount: $('logCount'),
   btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
   tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
@@ -66,9 +68,41 @@ const state = {
   gifUrls: new Map()
 };
 
+/* ---- gravador de sessão ----
+ * Fila de tamanho fixo com tudo o que aconteceu. O relatório gerado responde
+ * duas coisas: o que foi feito (e quanto levou) e o que NUNCA foi tocado, que é
+ * justamente o que continua sem verificação. `setStatus` é ponto único, então
+ * anotar aqui captura a linha do tempo inteira sem tocar em cada chamada.
+ * `setProgress` fica de fora de propósito: roda por célula e inundaria a fila. */
+const LOG_KEY = 'spriteforge.sessao';
+window.addEventListener('error', (e) => {
+  gravador.registrar('erro', `não capturado: ${e.message}`, {
+    origem: `${e.filename || '?'}:${e.lineno || 0}`, stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 1200) : null
+  });
+  gravador.contarErro();
+  gravarSessao();
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const motivo = e.reason instanceof Error ? e.reason.message : String(e.reason);
+  gravador.registrar('erro', `promessa rejeitada: ${motivo}`);
+  gravador.contarErro();
+  gravarSessao();
+});
+const gravador = criarGravador();
+try {
+  const bruto = localStorage.getItem(LOG_KEY);
+  if (bruto && gravador.restaurar(bruto)) gravador.registrar('sessao', 'sessão anterior restaurada');
+} catch { /* modo privado: começa do zero */ }
+function gravarSessao() {
+  try { localStorage.setItem(LOG_KEY, gravador.serializar()); } catch { /* sem storage, ok */ }
+}
+
 const setStatus = (msg, kind = '') => {
   el.status.textContent = t(msg);   // mensagens estáticas já saem traduzidas
   el.status.className = kind;
+  gravador.registrar(kind === 'err' ? 'erro' : 'status', String(msg ?? ''));
+  if (kind === 'err') gravador.contarErro();
+  gravarSessao();
 };
 
 /* ================================================================== *
@@ -445,6 +479,12 @@ function applyModel(root, animations, fileName) {
       : t('{nome} — sem animação (1 frame por direção)', { nome: state.name });
   };
   state.infoModeloFn();
+  gravador.marcar('modelo');
+  gravador.registrar('modelo', `${state.name} (${core.formatOf(fileName) || '?'}) — ${prepared.meshes} mesh, ${Math.round(triangles)} tris, ${state.clips.length} clip(s)`, {
+    nome: state.name, formato: core.formatOf(fileName), meshes: prepared.meshes,
+    tris: Math.round(triangles), clips: state.clips.map((c) => c.name)
+  });
+  gravarSessao();
   el.btnGenerate.disabled = false;
   hideError();
   setStatus(
@@ -461,6 +501,7 @@ function applyModel(root, animations, fileName) {
 
 /** Erro visível: a barra de status é estreita demais para não passar batido. */
 function showError(message) {
+  gravador.registrar('erro', String(message ?? '').slice(0, 300));
   el.loadError.textContent = message;
   el.loadError.style.display = 'block';
   setStatus(message, 'err');
@@ -541,6 +582,7 @@ window.addEventListener('drop', (e) => {
  * a página inteira; a barra de progresso mora na própria barra de abas, então
  * gerar a sheet não esconde o que está sendo feito. */
 function showTab(which) {
+  gravador.marcar('aba');
   const results = which === 'results';
   el.tabResults.setAttribute('aria-selected', String(results));
   el.tab3d.setAttribute('aria-selected', String(!results));
@@ -557,6 +599,10 @@ const STORAGE_KEY = 'spriteforge.settings.v1';
 const presetButtons = [...document.querySelectorAll('.preset[data-preset]')];
 
 function markPreset(name) {
+  if (name) {
+    gravador.marcar('preset');
+    gravador.registrar('opcoes', `predefinição ${name}`);
+  }
   presetButtons.forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
 }
 
@@ -684,6 +730,8 @@ function redesenharTextosDinamicos() {
  * navegador — o Lucas continua em pt-BR e o amigo gringo em inglês. */
 const IDIOMA_SALVO = 'spriteforge.idioma';
 function trocarIdioma(lang) {
+  gravador.marcar('idioma');
+  gravador.registrar('idioma', `idioma -> ${lang}`);
   aplicarIdioma(lang);
   try { localStorage.setItem(IDIOMA_SALVO, idiomaAtual()); } catch { /* modo privado */ }
   // Textos que o app monta dinamicamente precisam ser refeitos na hora.
@@ -695,7 +743,9 @@ try {
   if (salvo) { el.selIdioma.value = salvo; aplicarIdioma(salvo); }
 } catch { /* sem localStorage: fica em pt-BR */ }
 
+controls.addEventListener('start', () => gravador.marcar('orbital'));
 el.btnReframe.addEventListener('click', () => {
+  gravador.marcar('reenquadrar');
   framePreview();
   setStatus('câmera reenquadrada no modelo', 'ok');
 });
@@ -724,6 +774,7 @@ async function salvarProjeto() {
       const gravador = await handle.createWritable();
       await gravador.write(texto);
       await gravador.close();
+      gravador.marcar('projetoSalvar');
       setStatus(t('projeto salvo em {nome}', { nome: handle.name || sugerido }), 'ok');
       return;
     } catch (err) {
@@ -748,6 +799,7 @@ async function abrirProjeto(arquivo) {
     setStatus(t('não é um projeto do SpriteForge: {motivo}', { motivo: r.erro }), 'err');
     return;
   }
+  gravador.marcar('projetoAbrir');
   applySettings(r.projeto.settings);
   markPreset(null);          // o painel agora não corresponde a nenhum preset
   saveSettings(null);
@@ -767,8 +819,8 @@ el.projectInput.addEventListener('change', () => {
 
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
 el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
-el.btnSample.addEventListener('click', () => loadSample('fox.glb'));
-el.btnSampleStatic.addEventListener('click', () => loadSample('crate.obj'));
+el.btnSample.addEventListener('click', () => { gravador.marcar('amostra'); loadSample('fox.glb'); });
+el.btnSampleStatic.addEventListener('click', () => { gravador.marcar('amostra'); loadSample('crate.obj'); });
 
 el.clipSelect.addEventListener('change', () => selectClip(Number(el.clipSelect.value)));
 el.btnPlay.addEventListener('click', () => {
@@ -857,7 +909,11 @@ for (const [rangeKey, numKey] of NUMERIC_PAIRS) {
     range.value = String(v);
     range.dispatchEvent(new Event('input'));
     digitando = false;
-    if (rewrite) num.value = String(v);            // ao sair do campo, mostra o que valeu
+    if (rewrite) {
+      num.value = String(v);                        // ao sair do campo, mostra o que valeu
+      gravador.marcar('digitou');
+      gravador.registrar('opcoes', `${num.id || numKey} digitado -> ${v}`);
+    }
   };
   num.addEventListener('input', () => commit(false));
   num.addEventListener('change', () => commit(true));
@@ -872,10 +928,66 @@ const SETTING_CONTROLS = [
   el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow,
   el.selShadowGif
 ];
-SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => { markPreset(null); saveSettings(null); }));
+SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => {
+  markPreset(null);
+  saveSettings(null);
+  if (node === el.chkShadowLayer) gravador.marcar('camadaSombra');
+  if (node === el.chkLockScale && el.chkLockScale.checked) gravador.marcar('trava');
+  if (el.selPivot.value === 'custom') gravador.marcar('pivot');
+}));
 
 /* ---- diagnóstico ---- */
+/* ---- exportação do relatório de sessão ---- */
+function contextoRelatorio() {
+  let opcoes = null;
+  try {
+    opcoes = Object.entries(readSettings()).map(([k, v]) => `${k}=${v}`).join('  ');
+  } catch { /* painel indisponível: o relatório sai sem esta seção */ }
+  return {
+    idioma: idiomaAtual(),
+    ambiente: collectDiagnostics(),
+    modelo: state.model ? (el.modelInfo.textContent || state.name) : null,
+    opcoes
+  };
+}
+function atualizarContagemLog() {
+  if (!el.logCount) return;
+  const e = gravador.estado;
+  const inv = gravador.inventario();
+  el.logCount.textContent = t('{n} eventos · {u} recursos usados', { n: e.eventos.length, u: inv.usados.length });
+}
+function baixarRelatorio(formato) {
+  const ctx = contextoRelatorio();
+  const data = gravador.json(ctx);
+  const nome = `spriteforge-sessao-${data.sessao}.${formato}`;
+  if (formato === 'json') {
+    downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), nome);
+  } else {
+    downloadBlob(new Blob([gravador.texto(ctx)], { type: 'text/plain;charset=utf-8' }), nome);
+  }
+  gravador.registrar('relatorio', `relatório baixado (.${formato})`);
+  gravador.contarDownload();
+  gravarSessao();
+  setStatus(t('relatório da sessão baixado ({n} eventos)', { n: data.contagem.eventos }), 'ok');
+}
+el.btnLogTxt.addEventListener('click', () => baixarRelatorio('txt'));
+el.btnLogJson.addEventListener('click', () => baixarRelatorio('json'));
+el.btnLogLimpar.addEventListener('click', () => {
+  try { localStorage.removeItem(LOG_KEY); } catch { /* sem storage, ok */ }
+  const novo = criarGravador();
+  // Substitui o estado no lugar: os ganchos já instalados continuam apontando
+  // para `gravador`, então não é preciso religar nada.
+  Object.assign(gravador.estado, novo.estado);
+  gravador.estado.recursos = Object.create(null);
+  gravador.estado.eventos = [];
+  gravador.registrar('sessao', 'sessão limpa manualmente');
+  atualizarContagemLog();
+  setStatus(t('sessão limpa'), 'ok');
+});
+
 el.btnDiag.addEventListener('click', () => {
+  gravador.marcar('diagnostico');
+  atualizarContagemLog();
   const aberto = el.diagPanel.style.display === 'block';
   if (aberto) el.diagPanel.style.display = 'none';
   else showDiagnostics();
@@ -949,6 +1061,7 @@ function calibrateScaleLock() {
 el.btnCancel.addEventListener('click', () => {
   if (!state.generating) return;
   state.cancelled = true;
+  gravador.marcar('cancelou');
   el.btnCancel.disabled = true;
   setStatus('cancelando após a célula atual…', 'err');
 });
@@ -1022,6 +1135,19 @@ async function generate() {
 
   state.generating = true;
   state.cancelled = false;
+  const geracaoInicio = performance.now();
+  gravador.marcar('gerou');
+  gravador.contarGeracao('iniciadas');
+  const logFrames = clip ? Number(el.rngFrames.value) : 1;
+  const logCell = Number(el.rngCell.value);
+  gravador.registrar('geracao', `geração iniciada — ${dirCount} dir × ${logFrames}f, célula ${logCell}px, pivô ${pivot}`, {
+    dirCount, frames: logFrames, cell: logCell, elevation, azimuthOffset, pivot,
+    pivotCustom: pivot === 'custom' ? pivotCustom : null,
+    padding, turntable, lockScale, pxPerUnit: lockScale ? pxPerUnit : null,
+    ssaa: el.chkSsaa.checked, background, fps,
+    sombra: el.chkShadow.checked, camadaSombra: wantShadowLayer,
+    luzPresa: lightFollow, clip: clip ? clip.name : null
+  });
   el.btnGenerate.disabled = true;
   el.btnCancel.disabled = false;
   showProgress(true);
@@ -1212,10 +1338,21 @@ async function generate() {
     el.gifList.innerHTML = '';
     if (warnings.length) setStatus(warnings.join(' · '), 'err');
     else setStatus(t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)', { w: layout.w, h: layout.h, cols: layout.cols, rows: layout.rows, cell: layout.cell }) + (shadowSheet ? t(' · camada de sombra pronta no botão shadow.png') : ''), 'ok');
+    gravador.contarGeracao('concluidas', performance.now() - geracaoInicio);
+    gravador.registrar('geracao', `sheet concluída em ${Math.round(performance.now() - geracaoInicio)}ms — ${layout.w}×${layout.h}`, {
+      w: layout.w, h: layout.h, ms: Math.round(performance.now() - geracaoInicio)
+    });
   } catch (err) {
-    if (err && err.name === 'AbortError') setStatus('geração cancelada — a sheet anterior continua válida', 'err');
-    else {
+    if (err && err.name === 'AbortError') {
+      gravador.contarGeracao('canceladas', performance.now() - geracaoInicio);
+      gravador.registrar('geracao', `geração cancelada após ${Math.round(performance.now() - geracaoInicio)}ms`);
+      setStatus('geração cancelada — a sheet anterior continua válida', 'err');
+    } else {
       console.error(err);
+      gravador.contarGeracao('falhas', performance.now() - geracaoInicio);
+      gravador.registrar('erro', `geração falhou: ${err && err.message ? err.message : err}`, {
+        stack: err && err.stack ? String(err.stack).slice(0, 1200) : null
+      });
       setStatus(t('falha na geração: {msg}', { msg: err.message }), 'err');
     }
   } finally {
@@ -1354,6 +1491,7 @@ function playerTick(ts) {
 
 el.playerDir.addEventListener('change', () => { state.player.dir = Number(el.playerDir.value); drawPlayer(); });
 el.btnPlayerPlay.addEventListener('click', () => {
+  gravador.marcar('player');
   state.player.playing = !state.player.playing;
   el.btnPlayerPlay.textContent = state.player.playing ? 'Pause' : 'Play';
 });
@@ -1376,11 +1514,15 @@ const jsonBlob = (obj) => new Blob([JSON.stringify(obj, null, 2)], { type: 'appl
 el.dlSheet.addEventListener('click', () => {
   const r = state.result;
   if (!r) return;
+  gravador.marcar('dlSheet');
+  gravador.contarDownload();
   r.sheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.image), 'image/png');
 });
 el.dlShadow.addEventListener('click', () => {
   const r = state.result;
   if (!r || !r.shadowSheet) { setStatus('gere a sheet com "Camada de sombra separada" marcada', 'err'); return; }
+  gravador.marcar('dlSombra');
+  gravador.contarDownload();
   r.shadowSheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.shadow.file), 'image/png');
 });
 /** Personagem + sombra numa imagem só, com alpha de 8 bits.
@@ -1411,10 +1553,14 @@ el.dlSheetShadow.addEventListener('click', () => {
 el.chkPlayerShadow.addEventListener('change', drawPlayer);
 
 el.dlJson.addEventListener('click', () => {
+  gravador.marcar('dlJson');
+  gravador.contarDownload();
   const r = state.result;
   if (r) downloadBlob(jsonBlob(r.meta), `${r.meta.image.replace(/_sheet\.png$/, '')}_metadata.json`);
 });
 el.dlAseprite.addEventListener('click', () => {
+  gravador.marcar('dlAseprite');
+  gravador.contarDownload();
   const r = state.result;
   if (r) downloadBlob(jsonBlob(r.aseprite), r.meta.image.replace(/_sheet\.png$/, '.aseprite.json'));
 });
@@ -1523,6 +1669,8 @@ function montarGifs(gifs, sufixo, rotulo) {
     link.href = url;
     link.download = `${base}_dir${String(dir).padStart(2, '0')}${sufixo}.gif`;
     link.textContent = 'baixar';
+    // O download é um <a download>, então o gancho vai no clique do link.
+    link.addEventListener('click', () => { gravador.marcar('dlGif'); gravador.contarDownload(); gravarSessao(); });
     fig.append(img, cap, link);
     el.gifList.appendChild(fig);
   }
@@ -1613,11 +1761,18 @@ async function downloadZip() {
     showProgress(false);
   }
 }
-el.dlZip.addEventListener('click', downloadZip);
+el.dlZip.addEventListener('click', () => {
+  gravador.marcar('dlZip');
+  gravador.contarDownload();
+  downloadZip();
+});
 
 async function generateGifs() {
   const r = state.result;
   if (!r) { setStatus('gere a sheet antes dos GIFs', 'err'); return; }
+  gravador.marcar('gifs');
+  const gifInicio = performance.now();
+  gravador.registrar('gif', `gerando GIFs de ${r.dirCount} direções`);
   const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
   const opcoes = opcoesGif();
   el.btnGif.disabled = true;
@@ -1646,8 +1801,12 @@ async function generateGifs() {
           : `composto sobre fundo ${el.selGifBg.value === 'white' ? 'branco' : 'escuro'} (a sombra aparece como no preview)`),
       'ok'
     );
+    gravador.registrar('gif', `${r.dirCount} GIFs prontos em ${Math.round(performance.now() - gifInicio)}ms (${gifs[0].size}px)`, {
+      dirCount: r.dirCount, size: gifs[0].size, ms: Math.round(performance.now() - gifInicio)
+    });
   } catch (err) {
     console.error(err);
+    gravador.registrar('erro', `GIF falhou: ${err && err.message ? err.message : err}`);
     setStatus(t('falha no GIF: {msg}', { msg: err.message }), 'err');
   } finally {
     el.btnGif.disabled = false;
@@ -1675,3 +1834,7 @@ else {
       (salvo ? ' · suas preferências foram restauradas' : '')
   );
 }
+
+gravador.registrar('sessao', `sessão iniciada — ${location.protocol === 'file:' ? 'file:// (não funciona)' : location.origin}`);
+gravarSessao();
+atualizarContagemLog();

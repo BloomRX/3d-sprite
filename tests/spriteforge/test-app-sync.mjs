@@ -60,10 +60,20 @@ for (const [, numKey] of [['rngElevation','elevationVal'],['rngAzimuth','azimuth
 }
 const NUMERIC_PAIRS = [['rngElevation','elevationVal'],['rngAzimuth','azimuthVal'],['rngFrames','framesVal'],['rngCell','cellVal'],['rngPadding','paddingVal'],['rngScaleLock','scaleLockVal'],['rngFps','fpsVal'],['rngZoom','zoomVal'],['rngLightAz','lightAzVal'],['rngLightInt','lightIntVal']];
 
-new Function('el', 'NUMERIC_PAIRS', 'Event', bloco)(el, NUMERIC_PAIRS, Event);
+// O bloco real do app.js anota no gravador de sessão quando o usuário digita um
+// valor. O stub abaixo recebe essas chamadas — assim o teste continua exercitando
+// o código de verdade E verifica que a anotação acontece.
+const gravador = {
+  marcados: [], registrados: [],
+  marcar(id) { this.marcados.push(id); return true; },
+  registrar(tipo, msg) { this.registrados.push([tipo, msg]); }
+};
+
+new Function('el', 'NUMERIC_PAIRS', 'Event', 'gravador', bloco)(el, NUMERIC_PAIRS, Event, gravador);
 const digitar = (id, v) => { el[id].value = v; el[id].dispatchEvent(new Event('input')); };
 const sair = (id) => el[id].dispatchEvent(new Event('change'));
 const arrastar = (r, v) => { el[r].value = v; el[r].dispatchEvent(new Event('input')); };
+const digitarESair = (id, v) => { digitar(id, v); sair(id); };
 const soltar = (r) => el[r].dispatchEvent(new Event('change'));
 
 let fail = 0;
@@ -102,7 +112,7 @@ ok(el.cellVal.value === '3', `digitar "3" a caminho de "300" não é podado pra 
 const setPairSrc = bloco.slice(bloco.indexOf('function setPair'), bloco.indexOf('for (const [rangeKey, numKey] of NUMERIC_PAIRS)'));
 const el2 = {}; for (const k of Object.keys(el)) el2[k] = el[k];
 new Function('el', 'ANGULOS', setPairSrc)(el2, new Set(['elevationVal','azimuthVal','lightAzVal']));
-new Function('el','NUMERIC_PAIRS','Event', bloco)(el2, NUMERIC_PAIRS, Event);
+new Function('el','NUMERIC_PAIRS','Event','gravador', bloco)(el2, NUMERIC_PAIRS, Event, gravador);
 el2.rngCell.max = '512'; el2.rngCell.step = '8';
 new Function('el', 'ANGULOS', 'setPair', 'void 0;')({}, new Set(), () => {});
 const aplicar = new Function('el', 'ANGULOS', setPairSrc + '; return setPair;')(el2, new Set(['elevationVal','azimuthVal','lightAzVal']));
@@ -155,7 +165,39 @@ if (linhaGround) {
   ok(rodar(true, false) === false, 'camada separada com a sombra desligada -> chão fora');
 }
 
-const total = 29;
+/* ---- o gravador de sessão anota quando o usuário digita ---- */
+{
+  gravador.marcados.length = 0;
+  gravador.registrados.length = 0;
+  digitarESair('cellVal', 256);
+  ok(gravador.marcados.includes('digitou'),
+    'digitar um valor marca o recurso "digitou" no relatório da sessão');
+  ok(gravador.registrados.length > 0 && gravador.registrados[0][0] === 'opcoes',
+    'digitar um valor entra na linha do tempo como mudança de opção');
+  ok(gravador.registrados.some(([, msg]) => String(msg).includes('cellVal') && String(msg).includes('256')),
+    'a linha do tempo diz qual campo foi digitado e com que valor');
+
+  gravador.marcados.length = 0;
+  gravador.registrados.length = 0;
+  arrastar('rngCell', 192);
+  soltar('rngCell');
+  ok(!gravador.marcados.includes('digitou'),
+    'arrastar o slider NÃO conta como valor digitado (são interações diferentes)');
+
+  // Num navegador, <input type=number> com texto inválido devolve value === ''.
+  // O El falso rejeitaria no setter, então o '' é posto direto para emular isso.
+  gravador.marcados.length = 0;
+  gravador.registrados.length = 0;
+  const antes = el.rngCell.value;
+  el.cellVal._v = '';
+  el.cellVal.dispatchEvent(new Event('change'));
+  ok(el.cellVal.value === '', 'campo vazio ao sair NÃO é sobrescrito (o usuário pode estar apagando para digitar outro)');
+  ok(el.rngCell.value === antes, `e o slider não muda: continua ${el.rngCell.value}`);
+  ok(!gravador.marcados.includes('digitou') && gravador.registrados.length === 0,
+    'campo vazio não vira evento no relatório (nada aconteceu de fato)');
+}
+
+const total = 33;
 console.log(fail === 0
   ? `\n${total} passou, 0 falhou — sync slider/campo digitado do app.js`
   : `\n${total - fail} passou, ${fail} falhou`);

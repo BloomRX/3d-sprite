@@ -246,6 +246,67 @@ Leitura tolerante: JSON corrompido, arquivo que não é projeto, valor de tipo e
 projeto de versão futura nunca derrubam a interface — o que não presta cai no padrão, o
 que falta vem de `DEFAULT_SETTINGS`, e a barra de status diz o que foi ignorado.
 
+## Relatório da sessão
+
+Dentro de **Diagnóstico** há três botões: **baixar .txt**, **baixar .json** e **limpar**.
+O relatório existe para responder duas perguntas que um print não responde:
+
+1. **o que aconteceu**, em que ordem, e quanto tempo cada coisa levou;
+2. **o que nunca foi usado** — um recurso que você não tocou durante o teste é
+   justamente o que continua sem verificação.
+
+O `.txt` sai assim:
+
+```
+================================================================
+SpriteForge Web — relatório da sessão
+================================================================
+sessão  : s1x2y3
+início  : 2026-09-14T18:02:11.402Z
+duração : 4m12.7s
+eventos : 87
+
+--- ambiente ---
+three.js: r169
+GPU (sheet): AMD — Radeon RX 580
+maxTextureSize (sheet): 16384
+
+--- recursos usados (14/24) ---
+  [x] carregou um modelo  (+1.2s)
+  [x] gerou a spritesheet  (+52.0s)
+  [x] baixou o .zip  (+3m40.1s)
+
+--- nunca usados (10) — continuam sem verificação ---
+  [ ] cancelou uma geração
+  [ ] baixou a sombra separada
+  [ ] abriu um projeto
+
+--- resumo ---
+gerações   : 3 iniciadas, 3 concluídas, 0 canceladas, 0 falharam
+tempo render: 41.8s
+downloads  : 5
+erros      : 0
+
+--- linha do tempo ---
+[+0ms      ]sessao    sessão iniciada — http://localhost:8080
+[+1.2s     ]modelo    fox.glb (glb) — 3 mesh, 12000 tris, 2 clip(s)
+[+52.0s    ]geracao   sheet concluída em 8431ms — 1024×1024
+```
+
+O `.json` leva os mesmos dados mais o que não cabe em texto (stack de erro, as
+opções exatas de cada geração, a lista de clips do modelo).
+
+Detalhes que importam:
+
+- **Sobrevive a recarregar a página** (`localStorage`), então dá para testar, atualizar
+  e exportar depois. **limpar** zera e recomeça.
+- **Nunca trava a página**: a fila tem teto de 600 eventos; passou disso, descarta o
+  começo (o mais antigo) e conta quantos caíram.
+- **Erro não capturado entra no relatório.** `window.onerror` e `unhandledrejection`
+  são ouvidos, então uma exceção que você nem viu aparece no `.txt` com a origem.
+- **Nada sensível é gravado**: só nome de arquivo, opções do painel e dados da GPU —
+  os mesmos que o Diagnóstico já mostrava.
+
 ## Receitas de engine
 
 ### Godot 4 — `SpriteFrames` + `AtlasTexture`
@@ -511,6 +572,15 @@ func _ready() -> void:
     salvar) e o conteúdo dele nunca entra num commit. O perfil da janela de app
     (`.perfil-app/`) também é ignorado — é cache regenerável, específico da máquina.
 
+44. **O relatório lista o que NÃO foi usado.** Um log comum responde "o que aconteceu";
+    aqui a metade mais útil é a outra — os recursos que a sessão inteira não tocou, que
+    são exatamente os que continuam sem verificação. Por isso `log.js` mantém um
+    inventário fixo de 24 recursos e o relatório imprime os dois lados. O módulo é puro
+    (sem DOM, relógio injetado por parâmetro) para ser testável em Node; a fila tem teto
+    de 600 eventos para sessão longa não crescer sem limite, e `restaurar()` nunca lança
+    — arquivo de usuário é entrada não-confiável. `setProgress` fica de fora de propósito:
+    roda por célula e inundaria a fila.
+
 ## Testes
 
 O spec define o teste como o checklist de navegador:
@@ -535,7 +605,7 @@ node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core
 node tests\spriteforge\test-app-sync.mjs
 ```
 
-`test-app-sync.mjs` (**29 asserções**) cobre a outra ponta — os campos digitados. Como não há
+`test-app-sync.mjs` (**33 asserções**) cobre a outra ponta — os campos digitados. Como não há
 como abrir um navegador aqui, ele executa o **bloco real** do `app.js`, extraído do arquivo
 pelo texto, contra um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe
 no passo). Confirma que digitar 1024 na célula chega até o slider — que é o que `generate()`
@@ -543,7 +613,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**281 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**335 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

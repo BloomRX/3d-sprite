@@ -11,6 +11,7 @@
 import { readFile } from 'node:fs/promises';
 import * as THREE from '../../spriteforge/app/vendor/three.module.js';
 import * as i18n from '../../spriteforge/app/i18n.js';
+import * as log from '../../spriteforge/app/log.js';
 import * as core from '../../spriteforge/app/core.js';
 
 let pass = 0, fail = 0;
@@ -661,6 +662,95 @@ ok(core.parseProject(JSON.stringify({ preset: 'iso', settings: { cell: 128 } }))
   'exportação antiga do localStorage ainda abre');
 ok(core.parseProject(JSON.stringify(proj)).projeto.settings.directions === 4,
   'valor fora do default sobrevive (não é só "voltou pro padrão")');
+
+/* ---------------- gravador de sessão (log.js) ----------------
+ * O relógio é injetado, então nada aqui depende de tempo de parede. */
+let relogio = 1_000_000;
+const gr = log.criarGravador({ agora: () => relogio, id: 'sessao-de-teste' });
+ok(gr.estado.id === 'sessao-de-teste', 'gravador aceita id fixo');
+ok(gr.estado.eventos.length === 0, 'sessão nova começa sem eventos');
+ok(log.RECURSOS.length >= 20, `a lista de recursos cobre o app inteiro (${log.RECURSOS.length})`);
+ok(new Set(log.RECURSOS.map((r) => r.id)).size === log.RECURSOS.length, 'ids de recurso são únicos');
+ok(log.RECURSOS.every((r) => r.rotulo && r.en), 'todo recurso tem rótulo em pt e en');
+gr.registrar('inicio', 'sessão aberta');
+relogio += 1500;
+gr.registrar('modelo', 'fox.glb (glb) — 3 mesh, 12000 tris, 2 clips');
+ok(gr.estado.eventos.length === 2, 'eventos acumulam');
+ok(gr.estado.eventos[1].ms === 1500, 'carimbo é relativo ao início da sessão (ms)');
+ok(gr.marcar('modelo') === true, 'recurso conhecido é marcado');
+ok(gr.marcar('naoExiste') === false, 'recurso inexistente é recusado em vez de inventar linha');
+ok(Object.keys(gr.estado.recursos).length === 1, 'só recursos válidos entram no inventário');
+gr.marcar('modelo');
+ok(gr.estado.recursos.modelo === 1500, 'marcar de novo não sobrescreve o horário da primeira vez');
+// Fila de tamanho fixo: sessão longa não pode crescer sem limite.
+const gr2 = log.criarGravador({ agora: () => relogio });
+for (let i = 0; i < log.CAP_EVENTOS + 50; i += 1) gr2.registrar('x', `ev ${i}`);
+ok(gr2.estado.eventos.length === log.CAP_EVENTOS, 'a fila respeita o limite de eventos');
+ok(gr2.estado.descartados === 50, 'o que caiu é contado, não some em silêncio');
+ok(gr2.estado.eventos[0].msg === 'ev 50', 'descarta o começo da sessão, mantém o fim (o mais recente importa)');
+ok(gr2.estado.eventos[gr2.estado.eventos.length - 1].msg === `ev ${log.CAP_EVENTOS + 49}`, 'o último evento sobrevive');
+ok(log.cortar('a'.repeat(900)).length <= 200, 'string gigante é cortada');
+ok(log.cortar('curta') === 'curta', 'string curta passa intacta');
+ok(log.cortar(null) === '', 'null não quebra o corte');
+// Contadores que alimentam o resumo
+gr.contarGeracao('iniciadas');
+gr.contarGeracao('concluidas', 4200);
+gr.contarDownload();
+gr.contarErro();
+ok(gr.estado.geracoes.concluidas === 1 && gr.estado.geracoes.msTotal === 4200, 'tempo de render acumula');
+ok(gr.estado.downloads === 1 && gr.estado.erros === 1, 'downloads e erros são contados');
+gr.contarGeracao('campoQueNaoExiste');
+ok(gr.estado.geracoes.campoQueNaoExiste === undefined, 'contador inválido não cria campo');
+gr.contarGeracao('falhas', -5);
+ok(gr.estado.geracoes.msTotal === 4200, 'duração negativa não entra no total');
+ok(log.formatarDuracao(450) === '450ms', 'duração em ms');
+ok(log.formatarDuracao(12340) === '12.3s', 'duração em segundos');
+ok(log.formatarDuracao(95000) === '1m35.0s', 'duração em minutos e segundos');
+ok(log.formatarDuracao(NaN) === 'n/d', 'duração inválida não lança');
+// JSON exportado
+const j = gr.json({ idioma: 'en', ambiente: 'GPU X', modelo: 'fox.glb', opcoes: 'cell=128' });
+ok(j.formato === 'spriteforge.session' && j.versao === 1, 'JSON se identifica com formato e versão');
+ok(j.recursosUsados.includes('modelo') && !j.recursosUsados.includes('gifs'), 'usados e não usados separados');
+ok(j.recursosNaoUsados.length === log.RECURSOS.length - 1, 'não usados = total - usados');
+ok(j.contagem.erros === 1 && j.contagem.downloads === 1, 'contagem vai para o JSON');
+ok(j.eventos.length === 2, 'a linha do tempo vai para o JSON');
+ok(j.ambiente === 'GPU X' && j.opcoes === 'cell=128', 'ambiente e opções entram no JSON');
+// Relatório legível nos dois idiomas
+const txt = gr.texto({ idioma: 'pt-BR', ambiente: 'GPU X' });
+ok(txt.includes('relatório da sessão'), 'relatório tem título em português');
+ok(txt.includes('[x] carregou um modelo'), 'recurso usado aparece marcado');
+ok(txt.includes('[ ] gerou os GIFs'), 'recurso NÃO usado aparece marcado — é o que mostra o que falta testar');
+ok(txt.includes('nunca usados'), 'relatório tem seção do que não foi usado');
+ok(txt.includes('GPU X'), 'ambiente entra no relatório');
+ok(txt.includes('fox.glb (glb)'), 'os eventos entram na linha do tempo');
+ok(txt.includes('gerações'), 'o resumo de gerações entra no relatório');
+const txtEn = gr.texto({ idioma: 'en' });
+ok(txtEn.includes('session report') && txtEn.includes('[ ] generated the GIFs'), 'relatório também sai em inglês');
+// Persistência entre recarregamentos
+const bruto = gr.serializar();
+const gr3 = log.criarGravador({ agora: () => relogio });
+ok(gr3.restaurar(bruto) === true, 'a sessão restaura do próprio serializado');
+ok(gr3.estado.eventos.length === 2 && gr3.estado.recursos.modelo !== undefined, 'eventos e recursos voltam');
+ok(gr3.estado.geracoes.msTotal === 4200, 'os contadores voltam');
+ok(gr3.restaurar('{json quebrado') === false, 'JSON corrompido não lança');
+ok(gr3.restaurar('null') === false, 'null é rejeitado');
+ok(gr3.restaurar(JSON.stringify({ inicio: 'abc' })) === false, 'início inválido é rejeitado');
+ok(gr3.estado.eventos.length === 2, 'restauração que falhou deixa a sessão intacta');
+const sujo = JSON.stringify({
+  inicio: relogio,
+  eventos: [null, { ms: 'x', tipo: 'a', msg: 'b' }, 42],
+  recursos: { modelo: 'n', gifs: 5, recursoFalso: 1 }
+});
+const gr4 = log.criarGravador({ agora: () => relogio });
+ok(gr4.restaurar(sujo) === true, 'restauração tolera dado sujo');
+ok(gr4.estado.eventos.length === 1, 'só o evento válido sobrevive');
+ok(gr4.estado.eventos[0].ms === 0, 'carimbo inválido vira zero em vez de NaN');
+ok(!('recursoFalso' in gr4.estado.recursos), 'recurso inexistente é filtrado na restauração');
+ok(gr4.estado.recursos.gifs === 5, 'recurso válido é preservado');
+// Um gravador não interfere no outro (os testes usam vários)
+const gr5 = log.criarGravador({ agora: () => relogio });
+ok(gr5.estado.eventos.length === 0, 'gravadores são independentes');
+ok(gr5.estado.descartados === 0, 'o contador de descartados não vaza entre gravadores');
 
 console.log(`\n${pass} passou, ${fail} falhou`);
 process.exit(fail === 0 ? 0 : 1);

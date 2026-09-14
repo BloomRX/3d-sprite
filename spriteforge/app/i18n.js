@@ -274,6 +274,23 @@ const EN = {
   'não parece um projeto do SpriteForge (falta "kind" e "settings")':
     'does not look like a SpriteForge project (missing "kind" and "settings")',
   'o campo "settings" não é um objeto': 'the "settings" field is not an object',
+
+  /* ---- relatório da sessão ---- */
+  'Relatório da sessão': 'Session report',
+  'baixar .txt': 'download .txt',
+  'baixar .json': 'download .json',
+  'limpar': 'clear',
+  'Relatório legível: ambiente, linha do tempo e o que você não chegou a usar':
+    'Readable report: environment, timeline, and what you never got to use',
+  'Os mesmos dados em JSON, para analisar': 'The same data as JSON, for analysis',
+  'Apaga a sessão gravada e começa do zero': 'Deletes the recorded session and starts over',
+  'Lista cada ação em ordem, quanto tempo levou, e o que nunca foi usado — é isso que mostra o que ainda falta testar. A sessão sobrevive a recarregar a página.':
+    'Lists every action in order, how long it took, and what was never used — that is what shows what is left to test. The session survives a page reload.',
+  '{n} eventos · {u} recursos usados': '{n} events · {u} features used',
+  'relatório baixado (.txt)': 'report downloaded (.txt)',
+  'relatório baixado (.json)': 'report downloaded (.json)',
+  'relatório da sessão baixado ({n} eventos)': 'session report downloaded ({n} events)',
+  'sessão limpa': 'session cleared',
 };
 
 let atual = 'pt-BR';
