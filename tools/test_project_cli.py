@@ -282,5 +282,28 @@ class GitFlowTests(unittest.TestCase):
         self.assertIn('ainda não existe',result.stdout)
         self.assertEqual(self.git('rev-parse','HEAD').stdout.strip(),self.initial)
 
+class NormalizeInterpreterTests(unittest.TestCase):
+    """`python3` não existe no Windows (é alias da Microsoft Store)."""
+
+    def test_python3_vira_o_interpretador_atual(self):
+        argv = kit.normalize_interpreter(['python3', 'tools/test_project_cli.py'])
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[1:], ['tools/test_project_cli.py'])
+
+    def test_python_e_py_tambem(self):
+        for nome in ('python', 'py', 'PYTHON3', 'Python'):
+            self.assertEqual(kit.normalize_interpreter([nome, 'x.py'])[0], sys.executable, nome)
+
+    def test_outros_comandos_nao_mudam(self):
+        self.assertEqual(kit.normalize_interpreter(['node', 't.mjs']), ['node', 't.mjs'])
+        self.assertEqual(kit.normalize_interpreter(['npm', 'test']), ['npm', 'test'])
+
+    def test_lista_vazia_nao_quebra(self):
+        self.assertEqual(kit.normalize_interpreter([]), [])
+
+    def test_argumentos_viram_string(self):
+        self.assertEqual(kit.normalize_interpreter(['node', 1, True]), ['node', '1', 'True'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

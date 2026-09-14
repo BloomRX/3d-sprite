@@ -77,8 +77,9 @@ o resultado de vista.
 
 1. **Escolha uma predefinição** (opcional, mas é o caminho mais rápido):
    **Padrão**, **Personagem 2D**, **Isométrico** ou **Itens / props**. Cada uma ajusta
-   elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar. **Reset** volta
-   ao padrão do site. As preferências ficam salvas no navegador (`localStorage`).
+   elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar. **Padrão** é o
+   botão de voltar ao começo — não existe mais um "Reset" separado, era exatamente a
+   mesma coisa. As preferências ficam salvas no navegador (`localStorage`).
 2. **Carregue um modelo**: arraste em qualquer lugar da página, use **Abrir**,
    **Exemplo (Fox)** (animado) ou **Exemplo estático** (OBJ, sem animação → 1 frame por
    direção).
@@ -126,9 +127,10 @@ O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 | `<nome>_metadata.json` | schema completo, compatível com o CLI do Blender |
 | `<nome>.aseprite.json` | sidecar Aseprite: `frames` em array + `meta.frameTags` |
 | `<nome>_dirNN.gif` | um GIF animado por direção, com transparência |
+| **`<nome>_com_sombra.png`** | **personagem + sombra num sprite só**, com a sombra de verdade (alpha de 8 bits, 35 % de opacidade) e fundo transparente. É o que o GIF não consegue guardar |
 | **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas). Botão próprio, em linha separada logo abaixo do `metadata.json` — e também vai dentro do `.zip` |
 | **`<nome>_dirNN_shadow.gif`** | **GIF animado da sombra**, um por direção — o sprite à parte que você coloca junto do personagem. Sai no **Gerar GIFs** (grupo "GIFs da sombra") e na pasta `gif_sombra/` do `.zip` |
-| **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + um `LEIA-ME.txt` com as receitas de engine |
+| **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + `gif_sombra/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
 `order = "0 = frente, sentido anti-horário"`, `animation_axis = "columns"`, chaves
@@ -167,6 +169,22 @@ gravada nas duas folhas: o toggle do player só a escurecia em vez de desligar, 
 personagem continuava com a sombra cinza por baixo. As duas folhas são complementares —
 personagem limpo + sombra isolada — e é por isso que dá para ligar e desligar a sombra em
 jogo. Quer a sombra queimada no sprite? Desmarque a camada separada.
+
+### Sprite único com sombra real
+
+Quer um sprite só, com a sombra de verdade e fundo transparente? **`<nome>_com_sombra.png`** —
+é o personagem com a sombra composta por baixo, em PNG, então os 35 % de opacidade ficam
+exatamente como no preview. **Em GIF isso é impossível**: o formato guarda alpha de 1 bit
+(por pixel é opaco ou transparente, não existe meio-termo), então lá a sombra só sai sólida
+ou pontilhada.
+
+São três entregas da mesma sombra, escolha uma:
+
+| arquivo | o que é | quando usar |
+|---|---|---|
+| `_com_sombra.png` | personagem + sombra juntos, alpha real | o mais simples: um sprite só |
+| `_shadow.png` | só a sombra, mesma grade | quer ligar/desligar a sombra no jogo |
+| `gif_sombra/` | um GIF animado por direção | seu fluxo usa GIF, não spritesheet |
 
 ### A sombra como GIF (sprite à parte)
 
@@ -314,39 +332,53 @@ func _ready() -> void:
     cada mudança. Ele não pede `npm install`: um hook de resolução do Node faz o
     especificador `three` apontar para o arquivo **vendido**, então o teste exercita a
     mesma biblioteca que roda no navegador.
-22. **A sombra existe numa folha só.** Com a camada separada ligada, o passe do personagem
+22. **Sprite único com sombra real existe — em PNG.** A pergunta era se dava para ter
+    "sprite + sombra real com fundo transparente" em vez de só preto/branco. Em **GIF não
+    dá**: o formato guarda alpha de 1 bit, então 35 % de opacidade não é representável — não
+    é limitação nossa. Em PNG dá, e é o `<nome>_com_sombra.png`: as duas folhas compostas,
+    com o alpha de verdade. O `LEIA-ME.txt` do `.zip` agora lista as três entregas da sombra
+    e quando usar cada uma.
+23. **Um botão a menos.** "Reset (voltar ao padrão do site)" e o preset **Padrão** executavam
+    as mesmas três chamadas (`applySettings(default)` + `markPreset('default')` +
+    `saveSettings('default')`); só o texto do status mudava. O Reset existia de antes de haver
+    o botão **Padrão** — saiu o duplicado, ficou o preset.
+24. **`validate --full` não pode chamar `python3`.** No Windows `python3` não existe: é o
+    alias da Microsoft Store, que responde "Python was not found" e derrubava o comando
+    inteiro. `normalize_interpreter()` traduz `python3`/`python`/`py` para o
+    `sys.executable` de quem está rodando o script, e o `devkit.json` continua legível.
+25. **A sombra existe numa folha só.** Com a camada separada ligada, o passe do personagem
     renderiza com o chão escondido. Antes ele saía nas duas folhas, e o efeito era exatamente
     o relatado: o toggle "sombra" do player só a escurecia (tirava uma cópia, ficava a outra)
     e o sprite do personagem mantinha a sombra cinza. Como as folhas passaram a ser
     complementares, o GIF do personagem **recompõe** a sombra por baixo quando o fundo pede —
     assim as quatro opções de fundo continuam significando o que dizem, com ou sem camada.
-23. **O índice 0 da paleta não pode roubar uma cor.** O `encodeGif` fazia
+26. **O índice 0 da paleta não pode roubar uma cor.** O `encodeGif` fazia
     `palette[0] = [255,0,255]` para marcar a cor transparente — e isso **sobrescreve** a cor
     que estivesse ali. Num quadro só de sombra a paleta tem UMA cor (o preto), então o preto
     era apagado e a sombra inteira virava transparente: o GIF saía byte a byte igual ao de um
     quadro vazio. `reservarTransparente()` agora procura o magenta na paleta e o troca para o
     índice 0, ou acrescenta uma cor se ele não existir — nunca apaga. O teste é decisivo: a
     silhueta da sombra codifica **igual** a um quadro preto 100 % opaco.
-24. **A sombra como GIF, não só como folha.** O pedido era um sprite de sombra para usar em
+27. **A sombra como GIF, não só como folha.** O pedido era um sprite de sombra para usar em
     jogo, e folha PNG não é o que se põe num `AnimatedSprite2D`. `buildGifs` passou a aceitar
     qualquer folha na mesma grade, então a da sombra vira um GIF animado por direção
     (`gif_sombra/` no `.zip`). Ele é sempre transparente — um sprite de sombra com fundo
     sólido não serve — e sai em silhueta preta por padrão, que é a forma que o motor consegue
     modular; a opção pontilhada existe para quem prefere a aparência de 35 %.
-25. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
+28. **Sombra em camada separada.** O pedido era ter controle da sombra em jogo, e a
     resposta óbvia — exportar a sheet com e sem sombra — não dá controle nenhum. Sai uma
     terceira imagem, `<nome>_shadow.png`, na mesma grade, obtida num segundo passe com
     `colorWrite = false` nos materiais do modelo (ele continua no passe de sombras, só não
     escreve cor). `metadata.json` ganha `shadow: { file, layout, note }` — `null` quando a
     opção está desligada, para não inventar arquivo. O player tem um checkbox que desenha a
     camada por baixo, então dá para ver o resultado antes de baixar.
-26. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
+29. **Sombra pontilhada no GIF.** Depois do corte em 128 o GIF transparente ficou sem
     sombra nenhuma — correto, mas inútil para conferir o resultado. Como GIF não tem alpha
     parcial, a alternativa honesta é o *dithering*: `alphaMask()` com uma matriz de Bayer
     4×4 decide pixel a pixel, e 35 % de alpha vira 37,5 % de pontos opacos (6 de 16, o mais
     perto que a grade chega). Vazio e opaco continuam exatos; só a faixa parcial é
     pontilhada. É o padrão do seletor de fundo do GIF.
-27. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
+30. **GIF: alpha de 1 bit, resolvido com recorte em 50 % ou com fundo.** O corte de alpha
     era 8, então todo pixel semitransparente sobrevivia como opaco: a sombra do chão
     (`ShadowMaterial` a 0,35 = alpha ~89) saía **preta sólida** e a serrilha da borda saía
     com a cor do modelo, formando um halo. Não era a luz — era o formato. Agora o limiar é
@@ -354,7 +386,7 @@ func _ready() -> void:
     de quantizar e o GIF bate com o preview; sem fundo, ela é removida em vez de virar
     mancha. `alphaMask()` existe separado do `encodeGif` justamente para isso ser testável
     sem decodificar GIF.
-28. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
+31. **O campo digitado manda, e pode passar do teto do slider.** Pediram para poder digitar
     1024 numa célula cujo slider vai até 512. O teto não estava só no HTML: `generate()` lê
     `el.rngCell.value` (o **slider**) em ~20 pontos, então soltar o `max` do campo sozinho não
     mudaria nada — o valor digitado continuaria virando 512. A solução foi o campo **ampliar o
@@ -365,13 +397,13 @@ func _ready() -> void:
     `applySettings`, senão um preset salvo com 1024 era podado ao carregar. Célula grande não
     quebra nada: `computeLayout` já reduz a célula para caber em 8192 px e avisa na barra de
     status (1024 com 8×12 → 682 px).
-29. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
+32. **A barra de rolagem não sobrepõe os campos.** O `aside` rolava com `overflow-y:auto` e a
     barra do Windows caía em cima das caixinhas de número. Agora ele reserva o vão de uma vez
     (`scrollbar-gutter:stable`), usa barra fina e os campos têm largura fixa de 66 px.
-30. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
+33. **Sliders com campo numérico.** Os dez controles de valor aceitam texto digitado, com
     clamp na faixa do slider e disparando os mesmos handlers — não há um segundo caminho
     de efeito colateral para divergir.
-31. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
+34. **Uma segunda amostra sem animação** (`samples/crate.obj`, um caixote 1×1×1 apoiado
     em `y=0`) para exercitar o caminho de 1 frame por direção sem depender de o usuário
     ter um arquivo estático à mão.
 

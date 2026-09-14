@@ -199,7 +199,6 @@
         <button class="preset mini" id="presetIso" data-preset="iso">Isométrico</button>
         <button class="preset mini" id="presetProps" data-preset="props">Itens / props</button>
       </div>
-      <div class="row"><button id="btnReset" style="flex:1">Reset (voltar ao padrão do site)</button></div>
     </fieldset>
 
     <fieldset>
@@ -307,6 +306,14 @@
                 ⬛ shadow.png — só a sombra, separada
               </button>
             </div>
+            <div class="row">
+              <button id="dlSheetShadow" style="flex:1" title="personagem + sombra num sprite só, com alpha de 8 bits e fundo transparente">
+                🎭 sheet+sombra.png — sprite único, sombra real
+              </button>
+            </div>
+            <div class="hint">Personagem e sombra num arquivo só, com a sombra de verdade a 35 %
+              de opacidade — é o que o GIF não consegue guardar (o alpha dele é de 1 bit).
+              A sombra acima e o botão abaixo são as mesmas sombras, separadas.</div>
             <div class="hint">mesma grade da sheet: na engine, desenhe antes do sprite e esconda
               esse nó para tirar a sombra. Também vai dentro do .zip.</div>
             <div class="hint" id="jsonInfo"></div>

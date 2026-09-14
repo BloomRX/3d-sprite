@@ -31,12 +31,11 @@ const el = {
   chkShadowLayer: $('chkShadowLayer'),
   chkLightCamera: $('chkLightCamera'), rngLightAz: $('rngLightAz'), lightAzVal: $('lightAzVal'),
   rngLightInt: $('rngLightInt'), lightIntVal: $('lightIntVal'),
-  btnReset: $('btnReset'),   // os botões de preset vêm de .preset[data-preset]
   btnGenerate: $('btnGenerate'), btnCancel: $('btnCancel'),
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), progressLabel: $('progressLabel'),
   viewport: $('viewport'), viewportWrap: $('viewportWrap'), viewBadge: $('viewBadge'), loadError: $('loadError'),
   sheetPreview: $('sheetPreview'), chkGrid: $('chkGrid'), sheetInfo: $('sheetInfo'),
-  dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
+  dlZip: $('dlZip'), dlSheet: $('dlSheet'), dlShadow: $('dlShadow'), dlSheetShadow: $('dlSheetShadow'), dlJson: $('dlJson'), dlAseprite: $('dlAseprite'), jsonInfo: $('jsonInfo'),
   playerFrame: $('playerFrame'), playerCanvas: $('playerCanvas'), playerDir: $('playerDir'), btnPlayerPlay: $('btnPlayerPlay'),
   chkPlayerShadow: $('chkPlayerShadow'),
   rngFps: $('rngFps'), fpsVal: $('fpsVal'), rngZoom: $('rngZoom'), zoomVal: $('zoomVal'),
@@ -630,13 +629,6 @@ presetButtons.forEach((btn) => btn.addEventListener('click', () => {
   setStatus(`predefinição "${btn.textContent.trim()}" aplicada — ajuste o que quiser e gere`, 'ok');
 }));
 
-el.btnReset.addEventListener('click', () => {
-  applySettings(core.DEFAULT_SETTINGS);
-  markPreset('default');
-  saveSettings('default');
-  setStatus('configurações de volta ao padrão do site', 'ok');
-});
-
 el.btnOpen.addEventListener('click', () => el.fileInput.click());
 el.fileInput.addEventListener('change', () => { loadFiles(el.fileInput.files); el.fileInput.value = ''; });
 el.btnSample.addEventListener('click', () => loadSample('fox.glb'));
@@ -1220,6 +1212,31 @@ el.dlShadow.addEventListener('click', () => {
   if (!r || !r.shadowSheet) { setStatus('gere a sheet com "Camada de sombra separada" marcada', 'err'); return; }
   r.shadowSheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.shadow.file), 'image/png');
 });
+/** Personagem + sombra numa imagem só, com alpha de 8 bits.
+ *  É a resposta para "sprite com sombra real e fundo transparente": em PNG dá,
+ *  em GIF não — o alpha do GIF é de 1 bit, então lá a sombra só sai pontilhada
+ *  ou sólida. As duas folhas têm a mesma grade, então basta desenhar uma sobre a outra. */
+function composeSheetWithShadow(r) {
+  const c = document.createElement('canvas');
+  c.width = r.layout.w;
+  c.height = r.layout.h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(r.shadowSheet, 0, 0);
+  ctx.drawImage(r.sheet, 0, 0);
+  return c;
+}
+
+/** Nome do arquivo composto: <base>_sheet.png -> <base>_com_sombra.png */
+function nomeSheetComSombra(r) {
+  return r.meta.image.replace(/_sheet\.png$/, '_com_sombra.png');
+}
+
+el.dlSheetShadow.addEventListener('click', () => {
+  const r = state.result;
+  if (!r || !r.shadowSheet) { setStatus('gere a sheet com "Camada de sombra separada" marcada', 'err'); return; }
+  composeSheetWithShadow(r).toBlob((blob) => blob && downloadBlob(blob, nomeSheetComSombra(r)), 'image/png');
+});
+
 el.chkPlayerShadow.addEventListener('change', drawPlayer);
 
 el.dlJson.addEventListener('click', () => {
@@ -1362,10 +1379,13 @@ function readmeDoZip(r) {
     'Aseprite: File > Import Sprite Sheet, usando o .aseprite.json (ja traz as tags dirNN e o anchor).',
     '',
     m.shadow
-      ? `gif/ tem um GIF animado por direcao do personagem; gif_sombra/ tem o mesmo tanto da`
-        + ` sombra (sprite a parte, mesma grade). No motor: desenhe o GIF da sombra ANTES do`
-        + ` personagem e esconda o no dele para tirar a sombra. ${m.shadow.file} e a folha da`
-        + ` sombra, para quem prefere spritesheet a GIF.`
+      ? `Tres formas de usar a sombra, escolha uma:`
+        + `\n  1. ${nomeSheetComSombra(r)} — personagem e sombra num sprite so, com alpha de`
+        + ` verdade (a sombra a 35% como no preview). O mais simples de usar.`
+        + `\n  2. ${m.shadow.file} — so a sombra, mesma grade da sheet. No motor: desenhe ANTES`
+        + ` do personagem e esconda o no para tirar a sombra quando quiser.`
+        + `\n  3. gif_sombra/ — um GIF animado por direcao, para quem usa GIF em vez de sheet.`
+        + `\n  gif/ tem os GIFs do personagem (sem sombra: ela ficou nas opcoes acima).`
       : 'gif/ tem um GIF animado por direcao.',
     '',
     'Os GIFs em gif/ sao so para conferencia visual: GIF tem 256 cores por quadro e',
@@ -1395,6 +1415,9 @@ async function downloadZip() {
       setProgress(0.2, 'empacotando a camada de sombra…');
       const shadowBlob = await new Promise((resolve) => r.shadowSheet.toBlob(resolve, 'image/png'));
       if (shadowBlob) files[r.meta.shadow.file] = new Uint8Array(await shadowBlob.arrayBuffer());
+      setProgress(0.28, 'compondo personagem + sombra…');
+      const compostoBlob = await new Promise((resolve) => composeSheetWithShadow(r).toBlob(resolve, 'image/png'));
+      if (compostoBlob) files[nomeSheetComSombra(r)] = new Uint8Array(await compostoBlob.arrayBuffer());
     }
     setProgress(0.35, 'codificando os GIFs…');
     const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
