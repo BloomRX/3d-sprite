@@ -24,7 +24,7 @@ const el = {
   btnSampleStatic: $('btnSampleStatic'),
   btnSaveProject: $('btnSaveProject'), btnOpenProject: $('btnOpenProject'), projectInput: $('projectInput'),
   btnLogTxt: $('btnLogTxt'), btnLogJson: $('btnLogJson'), btnLogLimpar: $('btnLogLimpar'), logCount: $('logCount'),
-  btnPastaSaida: $('btnPastaSaida'),
+  btnPastaSaida: $('btnPastaSaida'), toast: $('toast'),
   btnDiag: $('btnDiag'), diagPanel: $('diagPanel'), diagBody: $('diagBody'), btnCopyDiag: $('btnCopyDiag'), btnCloseDiag: $('btnCloseDiag'),
   tab3d: $('tab3d'), tabResults: $('tabResults'), viewPane: $('viewPane'), resultPane: $('resultPane'),
   clipSelect: $('clipSelect'), btnPlay: $('btnPlay'), scrub: $('scrub'), scrubVal: $('scrubVal'), chkLoopPerfect: $('chkLoopPerfect'),
@@ -772,9 +772,25 @@ async function salvarProjeto() {
   const texto = JSON.stringify(projeto, null, 2);
   const base = state.name ? state.name.replace(/\.[^.]+$/, '') : 'spriteforge';
   const sugerido = `${base}.spriteforge.json`;
-  // File System Access API (Chrome/Edge, incluindo o modo app): grava direto na
-  // pasta que o usuário escolher — a projetos/ do app, por exemplo. Sem ela
-  // (Firefox/Safari) cai no download comum, que também resolve.
+  // Com a pasta do app escolhida, salva direto em projetos/ SEM perguntar:
+  // é isso que se espera de "salvar projeto".
+  const dirProjeto = await pastaPara('projetos');
+  if (dirProjeto) {
+    try {
+      await pasta.escreverArquivo(dirProjeto, pasta.nomeSeguro(sugerido), texto);
+      gravador.marcar('projetoSalvar');
+      gravador.registrar('saida', `${sugerido} -> ${dirProjeto.name}/`);
+      gravarSessao();
+      avisar(t('projeto gravado em <b>{pasta}</b>/{nome}', { pasta: dirProjeto.name, nome: sugerido }));
+      setStatus(t('projeto salvo em {pasta}/{nome}', { pasta: dirProjeto.name, nome: sugerido }), 'ok');
+      return;
+    } catch (err) {
+      setStatus(t('não consegui gravar na pasta ({msg}) — vou perguntar onde salvar', { msg: err && err.message ? err.message : err }), 'err');
+    }
+  }
+
+  // Sem pasta do app: File System Access API (Chrome/Edge, incluindo o modo app)
+  // pergunta onde salvar. Sem ela (Firefox/Safari) cai no download comum.
   if (typeof window.showSaveFilePicker === 'function') {
     try {
       const handle = await window.showSaveFilePicker({
@@ -1548,13 +1564,13 @@ async function restaurarPastaSaida() {
 function atualizarRotuloPasta() {
   if (!el.btnPastaSaida) return;
   if (!saida.pasta) {
-    el.btnPastaSaida.textContent = t('Pasta de saída: downloads');
-    el.btnPastaSaida.title = t('Os arquivos vão para a pasta de downloads do navegador. Clique para escolher uma pasta (por exemplo a pasta do app).');
+    el.btnPastaSaida.textContent = t('Pasta do app: não escolhida');
+    el.btnPastaSaida.title = t('Sem pasta escolhida: os arquivos vão para a pasta de downloads e salvar projeto abre um diálogo. Clique e escolha a pasta do app — as exportações passam a sair em saida/ e os projetos em projetos/, sem perguntar.');
     return;
   }
   const falta = saida.permissao ? '' : t(' — clique para autorizar');
-  el.btnPastaSaida.textContent = t('Pasta de saída: {nome}', { nome: saida.pasta.name }) + falta;
-  el.btnPastaSaida.title = t('Os arquivos saem em "{nome}". Clique para trocar ou esquecer.', { nome: saida.pasta.name });
+  el.btnPastaSaida.textContent = t('Pasta do app: {nome}', { nome: saida.pasta.name }) + falta;
+  el.btnPastaSaida.title = t('Exportações saem em "{nome}/saida/" e projetos em "{nome}/projetos/". Clique para trocar; botão direito para esquecer.', { nome: saida.pasta.name });
 }
 async function escolherPastaSaida() {
   if (!pasta.apiDisponivel()) {
@@ -1583,6 +1599,37 @@ async function esquecerPastaSaida() {
   setStatus(t('pasta de saída esquecida — voltou para a pasta de downloads'), 'ok');
 }
 
+/* ---- aviso visível de que algo saiu ----
+ * Sem isto o usuário clica e nada acontece na tela: o download do navegador
+ * aparece lá embaixo na barra dele, e gravar na pasta não mostra NADA.
+ */
+let toastTimer = 0;
+function avisar(msgHtml, { erro = false, ms = 3200 } = {}) {
+  if (!el.toast) return;
+  el.toast.innerHTML = msgHtml;
+  el.toast.className = erro ? 'on err' : 'on';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.toast.className = ''; }, ms);
+}
+
+/**
+ * Devolve a subpasta de um tipo dentro da pasta escolhida, criando se preciso.
+ *
+ * A pasta escolhida é a do APP: dentro dela as exportações vão para `saida/` e
+ * os projetos para `projetos/`. É o que o usuário espera — escolher uma vez e
+ * cada coisa cair no lugar certo, sem diálogo a cada salvamento. Se o usuário
+ * apontou direto para uma pasta que já tem o nome do tipo, não aninha.
+ */
+async function pastaPara(tipo) {
+  if (!saida.pasta || !saida.permissao) return null;
+  if (saida.pasta.name === tipo) return saida.pasta;
+  try {
+    return await saida.pasta.getDirectoryHandle(tipo, { create: true });
+  } catch {
+    return saida.pasta;      // sem permissão de criar subpasta: usa a raiz
+  }
+}
+
 /**
  * Roteia TODO download: pasta escolhida com permissão -> grava lá; senão, baixa.
  * Fazer isso aqui, e não em cada botão, é o que garante que sheet, JSON,
@@ -1590,16 +1637,19 @@ async function esquecerPastaSaida() {
  */
 async function downloadBlob(blob, filename) {
   const nome = pasta.nomeSeguro(filename);
-  if (saida.pasta && saida.permissao) {
+  const destino = await pastaPara('saida');
+  if (destino) {
     try {
-      await pasta.escreverArquivo(saida.pasta, nome, blob);
-      gravador.registrar('saida', `${nome} -> pasta ${saida.pasta.name}`);
+      await pasta.escreverArquivo(destino, nome, blob);
+      gravador.registrar('saida', `${nome} -> ${destino.name}/`);
       gravarSessao();
+      avisar(t('gravado em <b>{pasta}</b>/{nome}', { pasta: destino.name, nome }));
       return;
     } catch (err) {
       // Não perde o arquivo: cai no download e avisa.
       gravador.registrar('erro', `não consegui gravar ${nome} na pasta (${err && err.message ? err.message : err}) — baixando`);
       setStatus(t('não consegui gravar na pasta ({msg}) — baixei em vez disso', { msg: err && err.message ? err.message : err }), 'err');
+      avisar(t('não consegui gravar na pasta ({msg}) — baixei em vez disso', { msg: err && err.message ? err.message : err }), { erro: true });
     }
   }
   const url = URL.createObjectURL(blob);
@@ -1609,6 +1659,7 @@ async function downloadBlob(blob, filename) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  avisar(t('baixando <b>{nome}</b> — veja a pasta de downloads do navegador', { nome }));
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 const jsonBlob = (obj) => new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });

@@ -221,28 +221,47 @@ transparência você escolhe no motor (`self_modulate = Color(1,1,1,0.35)` no Go
 alpha no Unity) e ainda pode mudar de cor, esmaecer no pulo, etc. A opção **pontilhada**
 mantém a aparência de 35 % via Bayer 4×4, mas aí a transparência fica queimada na imagem.
 
-## Pasta de saída
+## Pasta do app
 
 Por padrão todo arquivo vai para a **pasta de downloads do navegador** — é o único lugar
-que um site pode escrever sem perguntar. Para os arquivos saírem na pasta do app, clique
-no botão **Pasta de saída: downloads** (no topo) e escolha uma pasta, por exemplo a
-**`saida/`** do repositório.
+que um site pode escrever sem perguntar. Para cada coisa cair no lugar certo, clique em
+**Pasta do app: não escolhida** (no topo) e escolha a **pasta do repositório**. Uma vez
+só. A partir daí:
+
+| O que sai | Para onde vai |
+| --- | --- |
+| sheet, sombra, `sheet+sombra`, `metadata.json`, `.aseprite.json`, GIFs, `.zip`, relatório | `<pasta>/saida/` |
+| projetos (`.spriteforge.json`) | `<pasta>/projetos/` |
+
+**Salvar projeto não abre mais diálogo** — grava direto em `projetos/`. As subpastas são
+criadas sozinhas se não existirem.
 
 - A escolha fica salva no navegador (**IndexedDB** — `localStorage` não serve, porque um
   `FileSystemDirectoryHandle` não vira string).
-- Vale para **tudo**: sheet, `sheet+sombra`, sombra separada, `metadata.json`,
-  `.aseprite.json`, os GIFs, o `.zip`, o projeto e o relatório.
-- **Botão direito** no mesmo botão esquece a pasta e volta aos downloads.
+- **Botão direito** no mesmo botão esquece a pasta e volta ao comportamento antigo.
 - Sobrescreve em vez de criar `sheet (1).png`: regenerar a sheet deve substituir a anterior.
 - Sem a API (Firefox, Safari) o botão avisa e tudo continua baixando — nada quebra.
 - Se a gravação na pasta falhar (disco cheio, permissão revogada), o arquivo **não se
   perde**: cai no download e a barra de status avisa.
 
+**Todo download avisa.** Um aviso aparece embaixo, no meio da tela, dizendo o que saiu e
+para onde (`gravado em saida/sheet.png` ou `baixando sheet.png — veja a pasta de
+downloads`). Antes disso, gravar na pasta não mostrava absolutamente nada — clicar e não
+acontecer nada é pior do que o download cair no lugar errado.
+
 Duas limitações do navegador que valem saber: depois de fechar e reabrir o navegador a
 permissão volta a `prompt`, e o navegador só deixa **pedir** permissão a partir de um
-clique — por isso o botão pode aparecer como `Pasta de saída: saida — clique para
+clique — por isso o botão pode aparecer como `Pasta do app: 3d-sprite — clique para
 autorizar`. Um clique resolve. E não há como o app escrever na própria pasta sem você
 tê-la escolhido uma vez: o navegador não permite.
+
+### Se a sombra sair vazia
+
+A geração conta os pixels da camada de sombra ao terminar. Se não houver nenhum, a barra
+de status avisa **na hora** e o relatório da sessão guarda os números (pixels visíveis,
+caixa ocupada, elevação, pivô, azimute e intensidade da luz). Sem isso, "a sombra saiu
+vazia" é impossível de diagnosticar de longe — pode ser a luz, o chão fora do
+enquadramento, a opacidade ou o export, e cada um tem uma correção diferente.
 
 ## Salvando um projeto
 
@@ -615,6 +634,22 @@ func _ready() -> void:
     — arquivo de usuário é entrada não-confiável. `setProgress` fica de fora de propósito:
     roda por célula e inundaria a fila.
 
+47. **Uma pasta do app, duas subpastas.** O usuário escolhe a pasta do repositório uma
+    vez; exportações vão para `saida/` e projetos para `projetos/`, criadas se preciso.
+    A alternativa — perguntar onde salvar a cada exportação — é o que tornava "salvar
+    projeto" um diálogo toda vez. Se o usuário apontar direto para uma pasta que já se
+    chama `saida` ou `projetos`, não aninha.
+48. **Avisar o download é parte do download.** Gravar na pasta não mostra nada por
+    padrão, então o clique parecia não fazer efeito. Todo arquivo que sai agora dispara
+    um aviso dizendo o que foi e para onde. Só `setStatus` não bastava: a barra de status
+    fica longe dos botões de exportação e é sobrescrita pela mensagem seguinte.
+49. **Censo de pixels na camada de sombra.** "Saiu vazia" é impossível de diagnosticar de
+    longe: luz, chão fora do enquadramento, opacidade e export são causas diferentes com
+    correções diferentes. `alphaCensus` conta os pixels na hora da geração e devolve
+    visíveis/total/caixa; vazio vira aviso na barra de status **e** número no relatório.
+    O corte padrão é alpha 1, não 128: a sombra tem alpha 89 (ShadowMaterial 0.35) e um
+    corte de 128 chamaria de vazia uma sombra perfeitamente boa.
+
 ## Testes
 
 O spec define o teste como o checklist de navegador:
@@ -647,7 +682,7 @@ lê —, que ângulos continuam limitados, que o mínimo continua valendo e que 
 sobrescrito no meio do número, e que cada modo de GIF sai com o corte de alpha certo. Entra
 no `validate --full`; **não** está no CI, porque o workflow só chama o núcleo.
 
-**362 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**378 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a

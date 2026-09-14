@@ -309,6 +309,23 @@ const EN = {
     'this browser cannot pick an output folder (Firefox/Safari) — files keep going to downloads',
   'não consegui gravar na pasta ({msg}) — baixei em vez disso':
     "couldn't write to the folder ({msg}) — downloaded it instead",
+  'não consegui gravar na pasta ({msg}) — vou perguntar onde salvar':
+    "couldn't write to the folder ({msg}) — I'll ask where to save",
+
+  /* ---- pasta do app (saida/ + projetos/) e avisos de download ---- */
+  'Pasta do app: não escolhida': 'App folder: not chosen',
+  'Pasta do app: {nome}': 'App folder: {nome}',
+  'Sem pasta escolhida: os arquivos vão para a pasta de downloads e salvar projeto abre um diálogo. Clique e escolha a pasta do app — as exportações passam a sair em saida/ e os projetos em projetos/, sem perguntar.':
+    'No folder chosen: files go to the browser downloads folder and saving a project opens a dialog. Click and pick the app folder — exports then go to saida/ and projects to projetos/, with no prompt.',
+  'Exportações saem em "{nome}/saida/" e projetos em "{nome}/projetos/". Clique para trocar; botão direito para esquecer.':
+    'Exports go to "{nome}/saida/" and projects to "{nome}/projetos/". Click to change it; right-click to forget it.',
+  'gravado em <b>{pasta}</b>/{nome}': 'saved to <b>{pasta}</b>/{nome}',
+  'baixando <b>{nome}</b> — veja a pasta de downloads do navegador':
+    'downloading <b>{nome}</b> — check your browser downloads folder',
+  'projeto gravado em <b>{pasta}</b>/{nome}': 'project saved to <b>{pasta}</b>/{nome}',
+  'projeto salvo em {pasta}/{nome}': 'project saved to {pasta}/{nome}',
+  'a camada de sombra saiu VAZIA — veja o Diagnóstico e me mande o relatório da sessão':
+    'the shadow layer came out EMPTY — open Diagnostics and send me the session report',
 };
 
 let atual = 'pt-BR';
