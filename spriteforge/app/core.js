@@ -1061,6 +1061,59 @@ export function alphaCensus(data, largura, corteAlpha = 1) {
  * Trim / compactação (pacote B5)
  * ------------------------------------------------------------------ */
 
+/** Reescreve um metadata de grade para descrever uma folha COMPACTADA.
+ *  Não inventa campo nenhum: `trimmed`, `spriteSourceSize` e `sourceSize` já
+ *  existiam no schema e estavam sempre em "não cortado". É a convenção
+ *  TexturePacker/Aseprite — `sourceSize` é a célula lógica, `frame` é o retângulo
+ *  físico na folha compactada — então Godot, Unity e Aseprite já entendem.
+ *  `cell` e `grid` passam a descrever a célula de ORIGEM (o que cada frame era
+ *  antes do corte), não a folha; quem lê usa `frames[*].frame`. */
+export function applyTrimToMetadata(meta, { boxes, placements, size }) {
+  const cell = meta.cell.w;
+  const frames = {};
+  const cols = meta.grid.cols;
+  const rows = meta.grid.rows;
+  // Itera por (direção, frame) e deriva a chave com frameKey, em vez de fatiar a
+  // string de volta. Fatiar é frágil: 'dir00_001' tem 9 caracteres, e um slice
+  // errado dá NaN silenciosamente — todo frame sairia "vazio".
+  for (let d = 0; d < rows; d += 1) {
+    for (let f = 0; f < cols; f += 1) {
+      const chave = frameKey(d, f);
+      const origem = meta.frames[chave];
+      if (!origem) continue;
+      const i = d * cols + f;
+      const caixa = boxes ? boxes[i] && boxes[i].caixa : null;
+      const pl = placements ? placements[i] : null;
+      if (!caixa || !pl) {
+        // Frame vazio: retângulo 0x0 é o que o formato espera, não um pixel solto.
+        frames[chave] = {
+          ...origem,
+          frame: { x: 0, y: 0, w: 0, h: 0 },
+          rotated: false,
+          trimmed: true,
+          spriteSourceSize: { x: 0, y: 0, w: 0, h: 0 },
+          sourceSize: { w: cell, h: cell }
+        };
+        continue;
+      }
+      frames[chave] = {
+        ...origem,
+        frame: { x: pl.x, y: pl.y, w: pl.w, h: pl.h },
+        rotated: false,
+        trimmed: true,
+        spriteSourceSize: { x: caixa.x, y: caixa.y, w: caixa.w, h: caixa.h },
+        sourceSize: { w: cell, h: cell }
+      };
+    }
+  }
+  return {
+    ...meta,
+    image: meta.image.replace(/_sheet\.png$/, '_sheet_packed.png'),
+    size: { w: size.w, h: size.h },
+    frames
+  };
+}
+
 /** Caixa de alpha de cada célula da grade, em coordenadas DA CÉLULA.
  *  É o que o trim precisa: o retângulo que realmente tem tinta. Frames vazios
  *  vêm com `caixa: null` — num sprite sheet animado isso é normal (quadros em

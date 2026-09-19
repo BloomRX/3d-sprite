@@ -709,6 +709,73 @@ const folhaTrim = (largura, altura, rects) => {
     `padding 4 entra na conta (gap medido ${gap}): folha ${dois.w}x${dois.h}`);
 }
 
+/* ---- applyTrimToMetadata: a folha compactada no schema que já existia ---- */
+{
+  const layT = core.computeLayout(2, 3, 16);
+  const metaT = core.buildMetadata({
+    baseName: 'fox', layout: layT, directionCount: 2, elevationDeg: 30, times: [0, 0.5, 1]
+  });
+  // 6 frames: um vazio no meio, para o caso null ser exercitado
+  const boxesT = [
+    { caixa: { x: 2, y: 3, w: 10, h: 9 } },
+    { caixa: null },
+    { caixa: { x: 0, y: 0, w: 16, h: 16 } },
+    { caixa: { x: 4, y: 4, w: 5, h: 5 } },
+    { caixa: { x: 1, y: 1, w: 14, h: 2 } },
+    { caixa: { x: 8, y: 8, w: 1, h: 1 } }
+  ];
+  const plT = [
+    { x: 0, y: 0, w: 10, h: 9 }, null, { x: 10, y: 0, w: 16, h: 16 },
+    { x: 0, y: 9, w: 5, h: 5 }, { x: 5, y: 9, w: 14, h: 2 }, { x: 0, y: 14, w: 1, h: 1 }
+  ];
+  const mt = core.applyTrimToMetadata(metaT, { boxes: boxesT, placements: plT, size: { w: 26, h: 26 } });
+
+  ok(JSON.stringify(Object.keys(mt)) === JSON.stringify(Object.keys(metaT)),
+    'as chaves de topo não mudam — o schema EXATO do spec continua valendo');
+  ok(Object.keys(mt.frames).length === 6, `todos os 6 frames continuam lá: ${Object.keys(mt.frames).length}`);
+  ok(mt.size.w === 26 && mt.size.h === 26, `size passa a ser o da folha compactada: ${mt.size.w}x${mt.size.h}`);
+  ok(mt.image === 'fox_sheet_packed.png', `o nome da imagem acompanha: ${mt.image}`);
+  ok(mt.cell.w === 16 && mt.grid.cols === 3,
+    'cell/grid continuam descrevendo a célula de ORIGEM (o que cada frame era antes do corte)');
+
+  // O bug que este teste existe para impedir: fatiar 'dir00_001' de volta dá NaN e
+  // TODO frame sai vazio. Conferir frame a frame pega isso.
+  const f00 = mt.frames.dir00_001;
+  ok(JSON.stringify(f00.frame) === JSON.stringify({ x: 0, y: 0, w: 10, h: 9 }),
+    `frame físico vem do pacote: ${JSON.stringify(f00.frame)}`);
+  ok(JSON.stringify(f00.spriteSourceSize) === JSON.stringify({ x: 2, y: 3, w: 10, h: 9 }),
+    `spriteSourceSize diz ONDE o recorte estava na célula: ${JSON.stringify(f00.spriteSourceSize)}`);
+  ok(JSON.stringify(f00.sourceSize) === JSON.stringify({ w: 16, h: 16 }),
+    'sourceSize é a célula lógica — é isso que a engine usa para reposicionar');
+  ok(f00.trimmed === true && f00.rotated === false, 'trimmed true e rotated false (o pacote não gira nada)');
+  ok(f00.duration === metaT.frames.dir00_001.duration, 'a duração do frame sobrevive ao trim');
+
+  const f01 = mt.frames.dir00_002;
+  ok(f01.frame.w === 0 && f01.frame.h === 0 && f01.spriteSourceSize.w === 0,
+    'frame vazio vira retângulo 0x0 (o que o formato espera), não um pixel solto');
+
+  // cada frame tem que apontar para o SEU retângulo, não todos para o primeiro
+  const distintos = new Set(Object.values(mt.frames).map((f) => `${f.frame.x},${f.frame.y},${f.frame.w},${f.frame.h}`));
+  ok(distintos.size === 6, `nenhum frame repete retângulo por índice errado: ${distintos.size} distintos`);
+
+  // ida e volta: dá para reconstruir a posição lógica a partir do metadata
+  const reconstruido = {
+    x: f00.frame.x - f00.spriteSourceSize.x,
+    y: f00.frame.y - f00.spriteSourceSize.y
+  };
+  ok(Number.isFinite(reconstruido.x) && Number.isFinite(reconstruido.y),
+    `a engine consegue reposicionar o recorte: offset ${JSON.stringify(reconstruido)}`);
+
+  // sem trim (caixas nulas) tudo vira 0x0 sem quebrar
+  const mtVazio = core.applyTrimToMetadata(metaT, {
+    boxes: boxesT.map(() => ({ caixa: null })),
+    placements: plT.map(() => null),
+    size: { w: 0, h: 0 }
+  });
+  ok(Object.values(mtVazio.frames).every((f) => f.frame.w === 0) && mtVazio.size.w === 0,
+    'tudo vazio não quebra nem dá NaN');
+}
+
 /* ---------------- escala travada ---------------- */
 approx(core.lockedHalf(128, 8), 8, 1e-12, 'trava a 8 px/un: half 8 (janela de 16 unidades)');
 approx(core.lockedHalf(128, 0.564), 113.475, 1e-3, 'trava a 0.564 px/un: half ~113.5 (cabe o Fox)');
