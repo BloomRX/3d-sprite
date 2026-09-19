@@ -776,6 +776,75 @@ const folhaTrim = (largura, altura, rects) => {
     'tudo vazio não quebra nem dá NaN');
 }
 
+/* ---- trimCopies: os offsets que erram em silêncio ----
+ * Um offset trocado desloca cada frame alguns pixels e nada avisa. Estes asserts
+ * comparam contra a posição calculada à mão. */
+{
+  const layC = { cell: 16, padding: 2, cols: 2, rows: 2, w: 36, h: 36 };
+  const boxesC = [
+    { dir: 0, frame: 0, vazio: false, caixa: { x: 3, y: 4, w: 10, h: 9 } },
+    { dir: 0, frame: 1, vazio: true, caixa: null },
+    { dir: 1, frame: 0, vazio: false, caixa: { x: 0, y: 0, w: 16, h: 16 } },
+    { dir: 1, frame: 1, vazio: false, caixa: { x: 5, y: 6, w: 2, h: 3 } }
+  ];
+  const plC = [
+    { x: 7, y: 7, w: 10, h: 9 }, null, { x: 0, y: 0, w: 16, h: 16 }, { x: 20, y: 3, w: 2, h: 3 }
+  ];
+  const copias = core.trimCopies(layC, boxesC, plC);
+
+  ok(copias.length === 3, `frame vazio fica de fora (não há o que copiar): ${copias.length} cópias de 4 frames`);
+
+  // dir0 frame0: célula começa em (pad, pad) = (2,2); caixa em (3,4) dentro dela
+  const c0 = copias[0];
+  ok(c0.sx === 2 + 3 && c0.sy === 2 + 4 && c0.sw === 10 && c0.sh === 9,
+    `origem soma o canto da célula com a caixa: (${c0.sx},${c0.sy}) ${c0.sw}x${c0.sh}`);
+  ok(c0.dx === 7 && c0.dy === 7 && c0.dw === 10 && c0.dh === 9,
+    `destino é o retângulo do pacote: (${c0.dx},${c0.dy}) ${c0.dw}x${c0.dh}`);
+
+  // dir1 frame0: célula em (2, 2+18) = (2,20); caixa cheia 16x16
+  const c1 = copias[1];
+  ok(c1.sx === 2 && c1.sy === 20 && c1.sw === 16 && c1.sh === 16,
+    `segunda linha desconta a altura da célula + padding: origem (${c1.sx},${c1.sy}) ${c1.sw}x${c1.sh}`);
+
+  // dir1 frame1: célula em (2+18, 20) = (20,20); caixa em (5,6) 2x3
+  const c2 = copias[2];
+  ok(c2.sx === 20 + 5 && c2.sy === 20 + 6 && c2.sw === 2 && c2.sh === 3,
+    `segunda coluna da segunda linha: origem (${c2.sx},${c2.sy}) ${c2.sw}x${c2.sh}`);
+  ok(c2.dx === 20 && c2.dy === 3, `e vai para (${c2.dx},${c2.dy}) na compactada`);
+
+  // tamanho nunca muda entre origem e destino — cortar não é escalar
+  ok(copias.every((c) => c.sw === c.dw && c.sh === c.dh),
+    'origem e destino têm o mesmo tamanho em toda cópia (trim não escala)');
+
+  // sem padding a origem é só a caixa
+  const laySem = { cell: 16, padding: 0, cols: 1, rows: 1, w: 16, h: 16 };
+  const cSem = core.trimCopies(laySem, [{ dir: 0, frame: 0, caixa: { x: 4, y: 5, w: 6, h: 7 } }], [{ x: 0, y: 0, w: 6, h: 7 }])[0];
+  ok(cSem.sx === 4 && cSem.sy === 5, `sem padding a origem é a própria caixa: (${cSem.sx},${cSem.sy})`);
+
+  // tudo vazio -> nada a copiar, sem quebrar
+  ok(core.trimCopies(layC, boxesC.map((b) => ({ ...b, caixa: null })), plC.map(() => null)).length === 0,
+    'tudo vazio -> zero cópias, sem NaN');
+  ok(core.trimCopies(layC, boxesC, null).length === 0, 'sem pacote -> zero cópias, não exceção');
+
+  // Guarda defensiva: caixa null COM destino presente. O packRects nunca produz
+  // isso (ele só empacota caixa com w,h > 0), mas sem o teste a guarda era código
+  // morto — e foi exatamente isso que fez um bug de offset passar despercebido.
+  const inconsistente = core.trimCopies(layC,
+    [{ dir: 0, frame: 0, vazio: true, caixa: null }, { dir: 0, frame: 1, vazio: false, caixa: { x: 1, y: 1, w: 4, h: 4 } }],
+    [{ x: 0, y: 0, w: 5, h: 5 }, { x: 9, y: 9, w: 4, h: 4 }]);
+  ok(inconsistente.length === 1,
+    `caixa null com destino presente é pulada, não vira TypeError: ${inconsistente.length} cópia`);
+  // frame 1 da dir 0: célula em x = pad + 1*(cell+pad) = 2+18 = 20, caixa em +1 -> 21
+  ok(inconsistente[0] && inconsistente[0].sx === 21 && inconsistente[0].sy === 3
+    && inconsistente[0].dx === 9 && inconsistente[0].dy === 9,
+    `e a cópia válida do mesmo lote sobrevive intacta: origem (${inconsistente[0].sx},${inconsistente[0].sy}) -> destino (${inconsistente[0].dx},${inconsistente[0].dy})`);
+
+  // a origem nunca cai fora da folha em grade
+  const dentro = copias.every((c) => c.sx >= 0 && c.sy >= 0
+    && c.sx + c.sw <= layC.w && c.sy + c.sh <= layC.h);
+  ok(dentro, 'nenhuma origem estoura a folha em grade');
+}
+
 /* ---------------- escala travada ---------------- */
 approx(core.lockedHalf(128, 8), 8, 1e-12, 'trava a 8 px/un: half 8 (janela de 16 unidades)');
 approx(core.lockedHalf(128, 0.564), 113.475, 1e-3, 'trava a 0.564 px/un: half ~113.5 (cabe o Fox)');

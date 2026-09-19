@@ -491,6 +491,8 @@
       <legend>Gerar</legend>
       <div class="row"><input type="checkbox" id="chkShadowLayer" checked><label for="chkShadowLayer">Camada de sombra separada</label></div>
       <div class="row"><span class="hint">Segunda sheet, mesma grade, só com a sombra — para você ligar e desligar no jogo.</span></div>
+      <div class="row"><input type="checkbox" id="chkTrim"><label for="chkTrim">Compactar (trim)</label></div>
+      <div class="row"><span class="hint">Corta cada frame no que tem tinta e reempacota a folha — costuma economizar mais da metade. Sai um arquivo extra <code>_sheet_packed.png</code> com metadata próprio; a sheet em grade continua igual. Quebra o "grid slice" do Unity: importe pelo JSON.</span></div>
       <div class="row"><button id="btnGenerate" class="primary" style="flex:1" disabled>Gerar spritesheet</button></div>
       <div class="row"><button id="btnCancel" class="danger" style="flex:1" disabled>Cancelar</button></div>
       <div class="hint">linhas = direções · colunas = frames</div>
@@ -555,6 +557,12 @@
               A sombra acima e o botão abaixo são as mesmas sombras, separadas.</div>
             <div class="hint">mesma grade da sheet: na engine, desenhe antes do sprite e esconda
               esse nó para tirar a sombra. Também vai dentro do .zip.</div>
+            <div class="row" id="rowPacked" hidden>
+              <button id="dlPacked" style="flex:1" title="folha compactada: cada frame cortado no que tem tinta e reempacotado. Importe pelo JSON, não por grid slice.">
+                📦 sheet_packed.png + metadata
+              </button>
+            </div>
+            <div class="hint" id="packedInfo" hidden></div>
             <div class="hint" id="jsonInfo"></div>
           </div>
         </div>

@@ -86,7 +86,11 @@ export const DEFAULT_SETTINGS = {
   lightCamera: false, lightAz: 34, lightIntensity: 2.6,
   pivotX: 0.5, pivotY: 0.5, pivotMark: true,
   loopPerfect: true, fps: 12, zoom: 1, gifScale: 1, gifBg: 'dither',
-  shadowLayer: true, playerShadow: true, shadowGif: 'silhueta'
+  shadowLayer: true, playerShadow: true, shadowGif: 'silhueta',
+  // Trim/compactação: corta cada frame no seu bounding box de alpha e reempacota
+  // a folha. Desligado por padrão porque quebra a grade uniforme — o player e o
+  // preview assumem célula fixa, e a receita de "grid slice" do Unity também.
+  trim: false
 };
 
 /**
@@ -1060,6 +1064,27 @@ export function alphaCensus(data, largura, corteAlpha = 1) {
 /* ------------------------------------------------------------------ *
  * Trim / compactação (pacote B5)
  * ------------------------------------------------------------------ */
+
+/** Pares de cópia para montar a folha compactada: de onde tirar na folha em grade
+ *  e onde colar na compactada. Extraído do callback de canvas justamente porque
+ *  é a parte que erra em silêncio — um offset trocado desloca cada frame alguns
+ *  pixels e nada avisa. Aqui dá para testar em Node.
+ *  Frames vazios ficam de fora: não há o que copiar. */
+export function trimCopies(layout, boxes, placements) {
+  const out = [];
+  for (let i = 0; i < boxes.length; i += 1) {
+    const b = boxes[i];
+    const pl = placements ? placements[i] : null;
+    if (!b || !b.caixa || !pl) continue;
+    const origem = cellRect(layout, b.dir, b.frame);
+    out.push({
+      sx: origem.x + b.caixa.x, sy: origem.y + b.caixa.y, sw: b.caixa.w, sh: b.caixa.h,
+      dx: pl.x, dy: pl.y, dw: pl.w, dh: pl.h,
+      dir: b.dir, frame: b.frame
+    });
+  }
+  return out;
+}
 
 /** Reescreve um metadata de grade para descrever uma folha COMPACTADA.
  *  Não inventa campo nenhum: `trimmed`, `spriteSourceSize` e `sourceSize` já

@@ -146,6 +146,7 @@ O valor é limitado à faixa do slider e dispara exatamente os mesmos efeitos.
 | **`<nome>_com_sombra.png`** | **personagem + sombra num sprite só**, com a sombra de verdade (alpha de 8 bits, 35 % de opacidade) e fundo transparente. É o que o GIF não consegue guardar |
 | **`<nome>_shadow.png`** | **só a sombra**, na mesma grade da sheet (mesma célula, mesmas linhas/colunas). Botão próprio, em linha separada logo abaixo do `metadata.json` — e também vai dentro do `.zip` |
 | **`<nome>_dirNN_shadow.gif`** | **GIF animado da sombra**, um por direção — o sprite à parte que você coloca junto do personagem. Sai no **Gerar GIFs** (grupo "GIFs da sombra") e na pasta `gif_sombra/` do `.zip` |
+| **`<nome>_sheet_packed.png`** | **folha compactada** (só com **Compactar (trim)** ligado): cada frame cortado no que tem tinta e reempacotado. Vem com `<nome>_packed_metadata.json` próprio — sem ele o PNG não serve, porque os frames não estão mais numa grade. Também vai no `.zip` |
 | **`<nome>_spriteforge.zip`** | tudo acima + `gif/` + `gif_sombra/` + um `LEIA-ME.txt` com as receitas de engine |
 
 Convenções (gravadas no JSON): `directions.layout = "row-per-direction"`,
@@ -160,6 +161,31 @@ No Aseprite o pivot vira um `slice` chamado `pivot`, então o anchor abre no lug
 Em **Godot**, o `offset` do `Sprite2D`/`AnimatedSprite2D` que corresponde a esse pivot é
 `(0.5 - pivot.x, 0.5 - pivot.y) * tamanho da célula`; em **Unity**, o pivot em pixels é
 `(pivot.x * cell.w, (1 - pivot.y) * cell.h)`.
+
+### Compactar (trim)
+
+Liga a caixa **Compactar (trim)** antes de gerar e sai uma folha extra, `<nome>_sheet_packed.png`,
+com cada frame cortado no retângulo que realmente tem tinta e reempacotado sem buracos. Nos
+testes, contra a grade uniforme, a economia foi de **67,3 %** — num top-down com vários
+personagens isso é a diferença entre caber e não caber na VRAM.
+
+Três coisas que importam:
+
+1. **A sheet em grade continua intacta.** A compactada é um arquivo a mais, não uma
+   substituição. O player, o preview e a receita de *grid slice* do Unity continuam
+   funcionando na original.
+2. **Use o metadata compactado, não o da grade.** O `_packed_metadata.json` diz onde cada
+   frame parou. O formato é o de sempre — `frame` é o retângulo físico, `sourceSize` é a
+   célula lógica e `spriteSourceSize` é onde o recorte estava dentro dela — que é a convenção
+   TexturePacker/Aseprite que Godot e Unity já entendem. Nenhum campo novo foi inventado:
+   `trimmed`, `spriteSourceSize` e `sourceSize` já existiam no schema e estavam sempre em
+   "não cortado".
+3. **`grid slice` não funciona na compactada.** No Unity, importe pelo JSON. No Aseprite,
+   `File > Import` o `_packed_metadata.json`.
+
+A barra de status diz o tamanho final e o percentual economizado, e o relatório da sessão
+guarda os números. Se a folha compactada passasse de 8192 px, o app avisa e não gera —
+melhor nenhum arquivo do que um corrompido.
 
 ### A camada de sombra
 
@@ -694,6 +720,20 @@ func _ready() -> void:
     absoluta em px/unidade e o preset não sabe o tamanho do modelo (o Fox tem 79 unidades,
     um personagem de jogo costuma ter 1). Ligar a caixa no painel calibra no modelo atual.
     Um teste projeta o tile e trava o 2:1 — se alguém mexer na elevação, a suíte falha.
+53. **Trim é um arquivo a mais, não uma substituição.** A sheet em grade continua intacta
+    porque o player, o preview e o *grid slice* do Unity assumem célula fixa; quebrar isso
+    para economizar bytes trocaria um problema de tamanho por um de usabilidade. Nenhum
+    campo novo no metadata: `trimmed`, `spriteSourceSize` e `sourceSize` já existiam no
+    schema do spec e estavam sempre em "não cortado" — a convenção TexturePacker/Aseprite
+    que Godot e Unity já entendem. O teste que trava a ordem exata das chaves não precisou
+    ser tocado.
+    A matemática dos offsets foi tirada do callback de canvas e levada para
+    `core.trimCopies()`, onde roda em Node: um offset trocado desloca cada frame alguns
+    pixels e **nada avisa**, então era a parte que precisava de teste. Os três bugs
+    clássicos foram verificados reintroduzindo-os: esquecer de somar a caixa, destino com
+    tamanho errado (trim viraria escala) e não pular frame vazio. O terceiro só passou a ser
+    pego depois de um caso de teste com `caixa: null` **e** destino presente — antes a
+    guarda era código morto e o teste não a exercitava.
 
 ## Testes
 
@@ -742,7 +782,7 @@ vazio e o Node sai com código 0, então uma suíte travada contava como sucesso
 5 s por causa disso. Entra no `validate --full`; **não** está no CI, porque o workflow só
 chama o núcleo.
 
-**378 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
+**431 asserções** no núcleo, sem `npm install`: o `three` importado é o arquivo vendido em
 `spriteforge/app/vendor/`, e o `fox.glb`/`crate.obj` usados são os do repo. Cobre
 azimutes e offset de frente, tempos de frame e loop perfeito, amostragem do auto-fit,
 **nenhum dos 96 frames do Fox estourando a célula** nos dois modos, elevações de −10° a
@@ -753,7 +793,10 @@ delays em centésimos), o recorte de alpha de 1 bit (a sombra a 35 % some em vez
 preto sólido), o pontilhado de Bayer (35 % de alpha → 96 de 256 pontos, com vazio e opaco
 intactos), o GIF com fundo sem nenhum quadro transparente e o bloco `shadow` do metadata, rig de luz,
 `disposeHierarchy` com geometria compartilhada, os cinco presets (incluindo a verificação
-de que 30° projetam um tile do chão em 2:1 exato), a escala travada e a amostra estática.
+de que 30° projetam um tile do chão em 2:1 exato), a escala travada, a amostra estática e o
+trim/compactação: `trimBoxes`, `packRects` (12 folhas aleatórias de 96 frames conferidas
+contra sobreposição e estouro), `applyTrimToMetadata` e `trimCopies`. Medido nos testes:
+**67,3 % de economia** contra a grade uniforme.
 
 Lint (o CI roda exatamente isto):
 

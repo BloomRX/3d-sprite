@@ -47,6 +47,18 @@ const EN = {
   'Isométrico': 'Isometric',
   'Itens / props': 'Items / props',
   'Top-down 2.5D': 'Top-down 2.5D',
+  'Compactar (trim)': 'Compact (trim)',
+  '📦 sheet_packed.png + metadata': '📦 sheet_packed.png + metadata',
+  'folha compactada: cada frame cortado no que tem tinta e reempacotado. Importe pelo JSON, não por grid slice.':
+    'packed sheet: every frame cropped to its ink and repacked. Import via the JSON, not grid slice.',
+  ' · compactada {w}×{h} ({p}% menor)': ' · packed {w}×{h} ({p}% smaller)',
+  'a folha compactada passou de {n}px — não deu para compactar': 'the packed sheet exceeded {n}px — could not compact',
+  'folha compactada: {w}×{h} a partir de {gw}×{gh} — {p}% menor. Importe pelo metadata compactado, não por grid slice.':
+    'packed sheet: {w}×{h} from {gw}×{gh} — {p}% smaller. Import via the packed metadata, not grid slice.',
+  'gere a sheet com "Compactar (trim)" marcada para ter a folha compactada':
+    'generate the sheet with "Compact (trim)" checked to get the packed sheet',
+  'Corta cada frame no que tem tinta e reempacota a folha — costuma economizar mais da metade. Sai um arquivo extra <code>_sheet_packed.png</code> com metadata próprio; a sheet em grade continua igual. Quebra o "grid slice" do Unity: importe pelo JSON.':
+    'Crops every frame to its ink and repacks the sheet — usually saves over half. Writes an extra <code>_sheet_packed.png</code> with its own metadata; the grid sheet is untouched. Breaks Unity\'s "grid slice": import via the JSON instead.',
   'Top-down 2.5D estilo Diablo/Hades: 30° dão tile do chão em 2:1 exato e a âncora fica nos pés, que é o que a ordenação de profundidade por Y precisa. Hades é mais alto — suba a elevação para 45–50°.':
     'Diablo/Hades-style top-down 2.5D: 30° gives an exact 2:1 ground tile and anchors at the feet, which is what Y-based depth sorting needs. Hades sits higher — raise the elevation to 45–50°.',
 

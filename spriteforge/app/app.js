@@ -36,7 +36,8 @@ const el = {
   rngFrames: $('rngFrames'), framesVal: $('framesVal'),
   rngCell: $('rngCell'), cellVal: $('cellVal'), chkSsaa: $('chkSsaa'), selBackground: $('selBackground'),
   chkTurntable: $('chkTurntable'), chkShadow: $('chkShadow'),
-  chkShadowLayer: $('chkShadowLayer'),
+  chkShadowLayer: $('chkShadowLayer'), chkTrim: $('chkTrim'),
+  rowPacked: $('rowPacked'), packedInfo: $('packedInfo'), dlPacked: $('dlPacked'),
   chkLightCamera: $('chkLightCamera'), rngLightAz: $('rngLightAz'), lightAzVal: $('lightAzVal'),
   rngLightInt: $('rngLightInt'), lightIntVal: $('lightIntVal'),
   btnGenerate: $('btnGenerate'), btnCancel: $('btnCancel'),
@@ -650,6 +651,7 @@ function applySettings(s) {
   el.selGifBg.value = s.gifBg || 'dither';
   el.selShadowGif.value = s.shadowGif || 'silhueta';
   el.chkShadowLayer.checked = !!s.shadowLayer;
+  el.chkTrim.checked = !!s.trim;
   el.chkPlayerShadow.checked = !!s.playerShadow;
   el.chkLightCamera.checked = !!s.lightCamera;
   setPair('rngLightAz', 'lightAzVal', s.lightAz);
@@ -686,6 +688,7 @@ function readSettings() {
     gifBg: el.selGifBg.value,
     shadowGif: el.selShadowGif.value,
     shadowLayer: el.chkShadowLayer.checked,
+    trim: el.chkTrim.checked,
     playerShadow: el.chkPlayerShadow.checked,
     lightCamera: el.chkLightCamera.checked,
     lightAz: Number(el.rngLightAz.value),
@@ -960,12 +963,14 @@ const SETTING_CONTROLS = [
   el.rngPadding, el.chkSsaa, el.chkLockScale, el.rngScaleLock, el.chkTurntable, el.selBackground,
   el.chkShadow, el.chkLoopPerfect, el.rngFps, el.rngZoom, el.rngGifScale, el.selGifBg,
   el.chkLightCamera, el.rngLightAz, el.rngLightInt, el.chkShadowLayer, el.chkPlayerShadow,
+  el.chkTrim,
   el.selShadowGif
 ];
 SETTING_CONTROLS.forEach((node) => node.addEventListener('change', () => {
   markPreset(null);
   saveSettings(null);
   if (node === el.chkShadowLayer) gravador.marcar('camadaSombra');
+  if (node === el.chkTrim) gravador.marcar('trim');
   if (node === el.chkLockScale && el.chkLockScale.checked) gravador.marcar('trava');
   if (el.selPivot.value === 'custom') gravador.marcar('pivot');
 }));
@@ -1373,7 +1378,42 @@ async function generate() {
     });
     const aseprite = core.buildAsepriteJson(meta);
 
-    state.result = { layout, meta, aseprite, sheet, shadowSheet, fps, fit, frame, dirCount, turntable, half };
+    // 6b. Compactação (trim): corta cada frame no que tem tinta e reempacota.
+    // A folha em grade continua intacta — o player, o preview e a receita de
+    // "grid slice" do Unity dependem dela. Isto é um arquivo EXTRA.
+    let packed = null;
+    if (el.chkTrim.checked) {
+      const dadosSheet = sctx.getImageData(0, 0, sheet.width, sheet.height).data;
+      const boxes = core.trimBoxes(dadosSheet, sheet.width, layout, 1);
+      const pacote = core.packRects(boxes.map((b) => b.caixa), {
+        maxSide: core.MAX_SHEET_SIDE, padding: layout.padding
+      });
+      if (pacote.overflow) {
+        warnings.push(t('a folha compactada passou de {n}px — não deu para compactar', { n: String(core.MAX_SHEET_SIDE) }));
+      } else if (pacote.w > 0) {
+        const tela = document.createElement('canvas');
+        tela.width = pacote.w;
+        tela.height = pacote.h;
+        const tctx = tela.getContext('2d', { willReadFrequently: true });
+        // A matemática dos offsets mora em core.trimCopies (testada em Node);
+        // aqui só se desenha.
+        for (const c of core.trimCopies(layout, boxes, pacote.placements)) {
+          tctx.drawImage(sheet, c.sx, c.sy, c.sw, c.sh, c.dx, c.dy, c.dw, c.dh);
+        }
+        const metaPacked = core.applyTrimToMetadata(meta, {
+          boxes, placements: pacote.placements, size: { w: pacote.w, h: pacote.h }
+        });
+        const areaGrade = layout.w * layout.h;
+        const economia = areaGrade ? 1 - pacote.area / areaGrade : 0;
+        packed = { canvas: tela, meta: metaPacked, economia };
+        gravador.registrar('trim',
+          `folha compactada ${pacote.w}×${pacote.h} a partir de ${layout.w}×${layout.h} ` +
+          `(${(economia * 100).toFixed(1)}% menor, ${boxes.filter((b) => !b.vazio).length}/${boxes.length} frames com tinta)`,
+          { w: pacote.w, h: pacote.h, gradeW: layout.w, gradeH: layout.h, economia });
+      }
+    }
+
+    state.result = { layout, meta, aseprite, sheet, shadowSheet, packed, fps, fit, frame, dirCount, turntable, half };
     state.player.dir = 0;
     state.player.frame = 0;
     showTab('results');
@@ -1392,6 +1432,17 @@ async function generate() {
         (azimuthOffset ? t(' · frente {az}°', { az: azimuthOffset }) : '') +
         ` · ${turntable ? 'turntable' : t('modelo girando')}` +
         (lockScale ? t(' · {ppu} px/unidade', { ppu: pxPerUnit }) : '');
+      // O botão da compactada só existe quando o trim estava ligado: deixar ele
+      // sempre visível e morto convidaria a um clique sem efeito.
+      el.rowPacked.hidden = !packed;
+      el.packedInfo.hidden = !packed;
+      if (packed) {
+        el.packedInfo.textContent = t(
+          'folha compactada: {w}×{h} a partir de {gw}×{gh} — {p}% menor. Importe pelo metadata compactado, não por grid slice.',
+          { w: packed.canvas.width, h: packed.canvas.height, gw: layout.w, gh: layout.h,
+            p: (packed.economia * 100).toFixed(0) }
+        );
+      }
     };
     state.result.infoFn();
     drawSheetPreview();
@@ -1399,7 +1450,7 @@ async function generate() {
     drawPlayer();
     el.gifList.innerHTML = '';
     if (warnings.length) setStatus(warnings.join(' · '), 'err');
-    else setStatus(t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)', { w: layout.w, h: layout.h, cols: layout.cols, rows: layout.rows, cell: layout.cell }) + (shadowSheet ? t(' · camada de sombra pronta no botão shadow.png') : ''), 'ok');
+    else setStatus(t('sheet pronta: {w}×{h} ({cols}×{rows} células de {cell}px)', { w: layout.w, h: layout.h, cols: layout.cols, rows: layout.rows, cell: layout.cell }) + (shadowSheet ? t(' · camada de sombra pronta no botão shadow.png') : '') + (packed ? t(' · compactada {w}×{h} ({p}% menor)', { w: packed.canvas.width, h: packed.canvas.height, p: (packed.economia * 100).toFixed(0) }) : ''), 'ok');
     gravador.contarGeracao('concluidas', performance.now() - geracaoInicio);
     gravador.registrar('geracao', `sheet concluída em ${Math.round(performance.now() - geracaoInicio)}ms — ${layout.w}×${layout.h}`, {
       w: layout.w, h: layout.h, ms: Math.round(performance.now() - geracaoInicio)
@@ -1706,6 +1757,20 @@ el.dlSheet.addEventListener('click', () => {
   gravador.contarDownload();
   r.sheet.toBlob((blob) => blob && downloadBlob(blob, r.meta.image), 'image/png');
 });
+el.dlPacked.addEventListener('click', () => {
+  const r = state.result;
+  if (!r || !r.packed) {
+    setStatus(t('gere a sheet com "Compactar (trim)" marcada para ter a folha compactada'), 'err');
+    return;
+  }
+  gravador.marcar('dlPacked');
+  gravador.contarDownload();
+  // O PNG sem o metadata compactado é inútil: os frames não estão mais numa
+  // grade, então só o JSON diz onde cada um parou.
+  r.packed.canvas.toBlob((blob) => blob && downloadBlob(blob, r.packed.meta.image), 'image/png');
+  const base = r.packed.meta.image.replace(/_sheet_packed\.png$/, '');
+  downloadBlob(jsonBlob(r.packed.meta), `${base}_packed_metadata.json`);
+});
 el.dlShadow.addEventListener('click', () => {
   const r = state.result;
   if (!r || !r.shadowSheet) { setStatus('gere a sheet com "Camada de sombra separada" marcada', 'err'); return; }
@@ -1940,6 +2005,16 @@ async function downloadZip() {
       setProgress(0.28, 'compondo personagem + sombra…');
       const compostoBlob = await new Promise((resolve) => composeSheetWithShadow(r).toBlob(resolve, 'image/png'));
       if (compostoBlob) files[nomeSheetComSombra(r)] = new Uint8Array(await compostoBlob.arrayBuffer());
+    }
+    if (r.packed) {
+      // A compactada vai junto, mas com o metadata PRÓPRIO: o metadata da grade
+      // descreve retângulos que não existem mais na folha compactada.
+      setProgress(0.32, 'empacotando a folha compactada…');
+      const packedBlob = await new Promise((resolve) => r.packed.canvas.toBlob(resolve, 'image/png'));
+      if (packedBlob) {
+        files[r.packed.meta.image] = new Uint8Array(await packedBlob.arrayBuffer());
+        files[`${base}_packed_metadata.json`] = strToU8(JSON.stringify(r.packed.meta, null, 2));
+      }
     }
     setProgress(0.35, 'codificando os GIFs…');
     const delay = Math.round(1000 / (Number(el.rngFps.value) || r.fps));
