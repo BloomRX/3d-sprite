@@ -1017,26 +1017,124 @@ export function parseProject(texto) {
  * @returns {{visiveis:number, total:number, fracao:number, vazio:boolean,
  *            caixa:{x:number,y:number,w:number,h:number}|null}}
  */
-export function alphaCensus(data, largura, corteAlpha = 1) {
-  const total = Math.floor(data.length / 4);
+/** Varre o alpha de uma região retangular: contagem + caixa, em coordenadas da
+ *  região. Base comum de `alphaCensus` (folha inteira) e `trimBoxes` (célula a
+ *  célula) — os dois precisam exatamente da mesma varredura. */
+function scanAlphaRegion(data, largura, corteAlpha, ox, oy, w, h) {
   let visiveis = 0;
   let minX = Infinity; let minY = Infinity;
   let maxX = -Infinity; let maxY = -Infinity;
-  for (let i = 0; i < total; i += 1) {
-    if (data[i * 4 + 3] < corteAlpha) continue;
-    visiveis += 1;
-    const x = i % largura;
-    const y = (i - x) / largura;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
+  for (let y = 0; y < h; y += 1) {
+    const base = ((oy + y) * largura + ox) * 4 + 3;
+    for (let x = 0; x < w; x += 1) {
+      if (data[base + x * 4] < corteAlpha) continue;
+      visiveis += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { visiveis, minX, minY, maxX, maxY };
+}
+
+const caixaDe = (r) => (r.visiveis
+  ? { x: r.minX, y: r.minY, w: r.maxX - r.minX + 1, h: r.maxY - r.minY + 1 }
+  : null);
+
+export function alphaCensus(data, largura, corteAlpha = 1) {
+  const total = Math.floor(data.length / 4);
+  const altura = largura > 0 ? Math.floor(total / largura) : 0;
+  const r = largura > 0 && altura > 0
+    ? scanAlphaRegion(data, largura, corteAlpha, 0, 0, largura, altura)
+    : { visiveis: 0 };
+  return {
+    visiveis: r.visiveis,
+    total,
+    fracao: total ? r.visiveis / total : 0,
+    vazio: r.visiveis === 0,
+    caixa: caixaDe(r)
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Trim / compactação (pacote B5)
+ * ------------------------------------------------------------------ */
+
+/** Caixa de alpha de cada célula da grade, em coordenadas DA CÉLULA.
+ *  É o que o trim precisa: o retângulo que realmente tem tinta. Frames vazios
+ *  vêm com `caixa: null` — num sprite sheet animado isso é normal (quadros em
+ *  que o efeito ainda não apareceu) e não pode virar retângulo 0×0 no pacote. */
+export function trimBoxes(data, largura, layout, corteAlpha = 1) {
+  const cell = layout.cell;
+  const pad = layout.padding || 0;
+  const step = cell + pad;
+  const out = [];
+  for (let dir = 0; dir < layout.rows; dir += 1) {
+    for (let frame = 0; frame < layout.cols; frame += 1) {
+      const r = scanAlphaRegion(
+        data, largura, corteAlpha, pad + frame * step, pad + dir * step, cell, cell
+      );
+      out.push({ dir, frame, vazio: r.visiveis === 0, caixa: caixaDe(r) });
+    }
+  }
+  return out;
+}
+
+/** Empacota retângulos por prateleiras e escolhe a largura de MENOR área.
+ *  Não gira nada, então `rotated` continua false no metadata — é o formato
+ *  TexturePacker/Aseprite que Godot e Unity já entendem.
+ *  Retorna `placements` alinhado por índice com `boxes` (null para vazio). */
+export function packRects(boxes, { maxSide = MAX_SHEET_SIDE, padding = 0 } = {}) {
+  const pad = Math.max(0, Math.floor(padding));
+  const itens = [];
+  boxes.forEach((b, index) => {
+    if (b && b.w > 0 && b.h > 0) itens.push({ index, w: b.w, h: b.h });
+  });
+  const vazio = { w: 0, h: 0, area: 0, placements: new Array(boxes.length).fill(null), overflow: false };
+  if (!itens.length) return vazio;
+
+  const empacotar = (largura) => {
+    const ord = itens.slice().sort((p, q) => (q.h - p.h) || (q.w - p.w));
+    const placed = new Array(boxes.length).fill(null);
+    let x = pad; let y = pad; let shelfH = 0; let maxX = pad;
+    for (const it of ord) {
+      if (x + it.w + pad > largura) {          // não cabe: próxima prateleira
+        x = pad; y += shelfH + pad; shelfH = 0;
+      }
+      placed[it.index] = { x, y, w: it.w, h: it.h };
+      x += it.w + pad;
+      if (x > maxX) maxX = x;
+      if (it.h > shelfH) shelfH = it.h;
+    }
+    return { w: maxX, h: y + shelfH + pad, placed };
+  };
+
+  // Candidatas: larguras que acomodam exatamente as k caixas mais largas numa
+  // fila, mais uma estimativa por área total. Testar só uma largura fixa
+  // desperdiça muito — a melhor depende da distribuição dos tamanhos.
+  const porLargura = itens.slice().sort((p, q) => q.w - p.w);
+  const candidatas = new Set();
+  let acc = pad;
+  for (const it of porLargura) { acc += it.w + pad; candidatas.add(acc); }
+  const areaTotal = itens.reduce((soma, it) => soma + (it.w + pad) * (it.h + pad), 0);
+  candidatas.add(Math.max(Math.ceil(Math.sqrt(areaTotal)) + pad, porLargura[0].w + 2 * pad));
+
+  let melhor = null;
+  for (const L of candidatas) {
+    if (L > maxSide) continue;
+    const r = empacotar(L);
+    if (r.h > maxSide) continue;
+    if (!melhor || r.w * r.h < melhor.w * melhor.h) melhor = r;
+  }
+  if (!melhor) {                                // nada coube: quem chama avisa
+    melhor = empacotar(maxSide);
   }
   return {
-    visiveis,
-    total,
-    fracao: total ? visiveis / total : 0,
-    vazio: visiveis === 0,
-    caixa: visiveis ? { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 } : null
+    w: melhor.w,
+    h: melhor.h,
+    area: melhor.w * melhor.h,
+    placements: melhor.placed,
+    overflow: melhor.w > maxSide || melhor.h > maxSide
   };
 }

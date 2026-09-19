@@ -580,6 +580,135 @@ ok(Math.abs(tileRatio(35.264, 0) - Math.sqrt(3)) < 1e-3,
   `isométrico verdadeiro (35,264°) dá 1,73:1, não 2:1: ${tileRatio(35.264, 0).toFixed(4)}`);
 ok(tileRatio(50, 0) < tileRatio(30, 0), 'subir a elevação (Hades) comprime o tile — por isso é outro visual, não outro preset');
 
+/* ---------------- trim / compactação (B5) ---------------- */
+// Monta um buffer RGBA com retângulos opacos em posições conhecidas.
+const folhaTrim = (largura, altura, rects) => {
+  const data = new Uint8ClampedArray(largura * altura * 4);
+  for (const { x, y, w, h, alpha = 255 } of rects) {
+    for (let j = 0; j < h; j += 1) {
+      for (let i = 0; i < w; i += 1) data[((y + j) * largura + (x + i)) * 4 + 3] = alpha;
+    }
+  }
+  return data;
+};
+{
+  // 2 direções x 2 frames, célula 16, sem padding.
+  const lay = { cell: 16, padding: 0, cols: 2, rows: 2, w: 32, h: 32 };
+  const data = folhaTrim(32, 32, [
+    { x: 4, y: 2, w: 6, h: 10 },        // dir0 frame0
+    { x: 20, y: 8, w: 4, h: 4 },       // dir0 frame1
+    { x: 1, y: 17, w: 14, h: 14 },     // dir1 frame0
+    // dir1 frame1 fica vazio de propósito
+  ]);
+  const bx = core.trimBoxes(data, 32, lay);
+  ok(bx.length === 4, `uma caixa por célula da grade: ${bx.length}`);
+  ok(JSON.stringify(bx[0].caixa) === JSON.stringify({ x: 4, y: 2, w: 6, h: 10 }),
+    `caixa em coordenadas DA CÉLULA, não da folha: ${JSON.stringify(bx[0].caixa)}`);
+  ok(JSON.stringify(bx[1].caixa) === JSON.stringify({ x: 4, y: 8, w: 4, h: 4 }),
+    `segunda coluna desconta o deslocamento da célula: ${JSON.stringify(bx[1].caixa)}`);
+  ok(bx[3].vazio === true && bx[3].caixa === null,
+    'frame sem tinta vem vazio (normal em animação) e não vira retângulo 0x0');
+  ok(bx.every((b, i) => b.dir === Math.floor(i / 2) && b.frame === i % 2),
+    'a ordem é linha=direção, coluna=frame — igual à folha');
+
+  // com padding o deslocamento tem que acompanhar
+  const layPad = { cell: 16, padding: 2, cols: 2, rows: 2, w: 36, h: 36 };
+  const dataPad = folhaTrim(36, 36, [{ x: 2 + 4, y: 2 + 2, w: 6, h: 10 }]);
+  const bxPad = core.trimBoxes(dataPad, 36, layPad);
+  ok(JSON.stringify(bxPad[0].caixa) === JSON.stringify({ x: 4, y: 2, w: 6, h: 10 }),
+    `padding é descontado: ${JSON.stringify(bxPad[0].caixa)}`);
+
+  // alpha fraco conta com corte 1 e some com corte 128 (a sombra tem alpha 89)
+  const dataFraco = folhaTrim(16, 16, [{ x: 3, y: 3, w: 5, h: 5, alpha: 89 }]);
+  const layUm = { cell: 16, padding: 0, cols: 1, rows: 1, w: 16, h: 16 };
+  ok(core.trimBoxes(dataFraco, 16, layUm, 1)[0].caixa !== null, 'corte 1 enxerga a sombra a alpha 89');
+  ok(core.trimBoxes(dataFraco, 16, layUm, 128)[0].vazio === true, 'corte 128 não — por isso o corte padrão é 1');
+}
+
+/* ---- packRects: nada pode se sobrepor, senão a sheet corrompe em silêncio ---- */
+{
+  const sobrepoe = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const conferir = (boxes, opts, rotulo) => {
+    const r = core.packRects(boxes, opts);
+    const vivos = [];
+    r.placements.forEach((pl, i) => {
+      if (!pl) return;
+      if (pl.w !== boxes[i].w || pl.h !== boxes[i].h) {
+        ok(false, `${rotulo}: frame ${i} mudou de tamanho no pacote`);
+      }
+      if (pl.x < 0 || pl.y < 0 || pl.x + pl.w > r.w || pl.y + pl.h > r.h) {
+        ok(false, `${rotulo}: frame ${i} estoura a folha (${pl.x},${pl.y} ${pl.w}x${pl.h} em ${r.w}x${r.h})`);
+      }
+      vivos.push(pl);
+    });
+    for (let i = 0; i < vivos.length; i += 1) {
+      for (let j = i + 1; j < vivos.length; j += 1) {
+        if (sobrepoe(vivos[i], vivos[j])) {
+          ok(false, `${rotulo}: sobreposição entre ${JSON.stringify(vivos[i])} e ${JSON.stringify(vivos[j])}`);
+          return r;
+        }
+      }
+    }
+    return r;
+  };
+
+  const simples = core.packRects([{ x: 0, y: 0, w: 10, h: 10 }], { padding: 2 });
+  ok(simples.w === 14 && simples.h === 14, `uma caixa 10x10 com padding 2 -> folha 14x14: ${simples.w}x${simples.h}`);
+
+  const nulos = core.packRects([{ w: 8, h: 8 }, null, { w: 4, h: 4 }], { padding: 0 });
+  ok(nulos.placements[1] === null && nulos.placements[0] && nulos.placements[2],
+    'frame vazio fica sem lugar no pacote (null), os outros seguem');
+
+  const tudoVazio = core.packRects([null, { w: 0, h: 5 }], {});
+  ok(tudoVazio.w === 0 && tudoVazio.h === 0 && tudoVazio.placements.every((p) => p === null),
+    'tudo vazio -> folha 0x0, sem NaN');
+
+  // caso real: 8 direções x 12 frames, caixas de tamanhos variados
+  const casos = [];
+  let semente = 12345;
+  const rnd = () => { semente = (semente * 1103515245 + 12345) & 0x7fffffff; return semente / 0x7fffffff; };
+  for (let k = 0; k < 12; k += 1) {
+    const boxes = [];
+    for (let i = 0; i < 96; i += 1) {
+      if (rnd() < 0.12) { boxes.push(null); continue; }
+      boxes.push({ w: 8 + Math.floor(rnd() * 120), h: 8 + Math.floor(rnd() * 120) });
+    }
+    casos.push(boxes);
+  }
+  let semSobreposicao = true;
+  let ganhoTotal = 0;
+  let areaGradeTotal = 0;
+  for (const boxes of casos) {
+    conferir(boxes, { padding: 1 }, 'aleatório');
+    const r = core.packRects(boxes, { padding: 1 });
+    // compara com a grade uniforme equivalente (célula = maior lado)
+    const maior = Math.max(...boxes.filter(Boolean).map((b) => Math.max(b.w, b.h)));
+    const vivos = boxes.filter(Boolean).length;
+    areaGradeTotal += (maior + 1) * (maior + 1) * vivos;
+    ganhoTotal += r.area;
+  }
+  ok(semSobreposicao, 'nenhuma sobreposição em 12 folhas aleatórias de 96 frames');
+  const economia = 1 - ganhoTotal / areaGradeTotal;
+  ok(economia > 0.3,
+    `compactação economiza ${(economia * 100).toFixed(1)}% contra a grade uniforme (12 casos de 96 frames)`);
+
+  // limite de 8192 precisa ser respeitado ou sinalizado
+  const grandes = Array.from({ length: 40 }, () => ({ w: 1500, h: 1500 }));
+  const rGrande = core.packRects(grandes, { maxSide: 8192, padding: 0 });
+  ok(rGrande.overflow === true || (rGrande.w <= 8192 && rGrande.h <= 8192),
+    `ou cabe em 8192, ou avisa: ${rGrande.w}x${rGrande.h} overflow=${rGrande.overflow}`);
+  conferir(grandes, { maxSide: 8192, padding: 0 }, 'grande');
+
+  // padding realmente separa
+  const dois = core.packRects([{ w: 10, h: 10 }, { w: 10, h: 10 }], { padding: 4 });
+  conferir([{ w: 10, h: 10 }, { w: 10, h: 10 }], { padding: 4 }, 'padding');
+  const [p0, p1] = dois.placements;
+  const gap = Math.max(Math.abs(p0.x - (p1.x + p1.w)), Math.abs(p1.x - (p0.x + p0.w)),
+    Math.abs(p0.y - (p1.y + p1.h)), Math.abs(p1.y - (p0.y + p0.h)));
+  ok(dois.w >= 10 + 4 + 10 || dois.h >= 10 + 4 + 10,
+    `padding 4 entra na conta (gap medido ${gap}): folha ${dois.w}x${dois.h}`);
+}
+
 /* ---------------- escala travada ---------------- */
 approx(core.lockedHalf(128, 8), 8, 1e-12, 'trava a 8 px/un: half 8 (janela de 16 unidades)');
 approx(core.lockedHalf(128, 0.564), 113.475, 1e-3, 'trava a 0.564 px/un: half ~113.5 (cabe o Fox)');
