@@ -103,6 +103,21 @@ export const PRESETS = {
   // jogo costuma ter 1. Quem quiser combinar vários objetos liga a trava na mão,
   // e o controle se calibra sozinho no modelo atual ao ser ligado.
   iso: { elevation: 30, pivot: 'center', cell: 128, lockScale: false, shadow: true },
+  // Top-down 2.5D (Diablo/Hades): 30° de elevação dá tile do chão em 2:1 EXATO —
+  // é a projeção dimétrica do Diablo 2. Medido projetando um tile unitário do
+  // plano XZ pela câmera ortográfica: a 30° a caixa na tela sai 2,000:1 e o valor
+  // independe do azimute. Isométrico verdadeiro seria 35,264° (1,73:1) e Hades é
+  // mais alto: 45–50°.
+  // O pivot na BASE é o que diferencia este preset do isométrico. Em top-down a
+  // ordenação de profundidade é por Y, então a âncora tem que ficar nos PÉS: com
+  // 'center' o sprite ancora no meio da célula (64px acima da base numa célula de
+  // 128) e o personagem flutua meio corpo acima da posição lógica — a ordenação
+  // erra quando ele passa atrás de um objeto.
+  // lockScale fica DESLIGADA de propósito (mesma razão do iso): ela é absoluta em
+  // px/unidade e o preset não sabe o tamanho do seu modelo — o Fox tem 79 unidades
+  // e um personagem de jogo costuma ter 1. Ligue a caixa no painel e o valor se
+  // calibra sozinho no modelo atual; é o caminho para vários assets na mesma escala.
+  topdown: { elevation: 30, pivot: 'base', cell: 128, lockScale: false, shadow: true },
   // Itens/ícones: 4 direções, célula pequena, luz frontal sem sombra.
   props: { directions: 4, elevation: 0, pivot: 'center', cell: 64, shadow: false, lightCamera: true }
 };

@@ -46,6 +46,9 @@ const EN = {
   'Personagem 2D': '2D Character',
   'Isométrico': 'Isometric',
   'Itens / props': 'Items / props',
+  'Top-down 2.5D': 'Top-down 2.5D',
+  'Top-down 2.5D estilo Diablo/Hades: 30° dão tile do chão em 2:1 exato e a âncora fica nos pés, que é o que a ordenação de profundidade por Y precisa. Hades é mais alto — suba a elevação para 45–50°.':
+    'Diablo/Hades-style top-down 2.5D: 30° gives an exact 2:1 ground tile and anchors at the feet, which is what Y-based depth sorting needs. Hades sits higher — raise the elevation to 45–50°.',
 
   /* ---- modelo e animação ---- */
   'Abrir modelo': 'Open model',

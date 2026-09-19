@@ -87,10 +87,10 @@ não leva susto, e dá para mandar o link para alguém que só lê inglês. A in
 traduz na hora, inclusive as mensagens de status e de progresso.
 
 1. **Escolha uma predefinição** (opcional, mas é o caminho mais rápido):
-   **Padrão**, **Personagem 2D**, **Isométrico** ou **Itens / props**. Cada uma ajusta
-   elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar. **Padrão** é o
-   botão de voltar ao começo — não existe mais um "Reset" separado, era exatamente a
-   mesma coisa. As preferências ficam salvas no navegador (`localStorage`).
+   **Padrão**, **Personagem 2D**, **Isométrico**, **Top-down 2.5D** ou **Itens / props**.
+   Cada uma ajusta elevação, pivot, célula, sombra e luz de uma vez; depois é só afinar.
+   **Padrão** é o botão de voltar ao começo — não existe mais um "Reset" separado, era
+   exatamente a mesma coisa. As preferências ficam salvas no navegador (`localStorage`).
 2. **Carregue um modelo**: arraste em qualquer lugar da página, use **Abrir**,
    **Exemplo (Fox)** (animado) ou **Exemplo estático** (OBJ, sem animação → 1 frame por
    direção).
@@ -679,6 +679,21 @@ func _ready() -> void:
     visíveis/total/caixa; vazio vira aviso na barra de status **e** número no relatório.
     O corte padrão é alpha 1, não 128: a sombra tem alpha 89 (ShadowMaterial 0.35) e um
     corte de 128 chamaria de vazia uma sombra perfeitamente boa.
+52. **Preset "Top-down 2.5D" é o isométrico com o pivot nos pés.** Para Diablo/Hades a
+    diferença que importa não é o ângulo — é a âncora. Em top-down a ordenação de
+    profundidade é por Y, então o sprite ancora nos PÉS; com o pivot no centro (o que o
+    preset isométrico usa) a âncora fica 64px acima da base numa célula de 128 e o
+    personagem flutua meio corpo acima da posição lógica — a ordenação erra quando ele
+    passa atrás de um objeto. A diferença medida é de 55,04px.
+    O ângulo foi **medido, não copiado**: projetando um tile quadrado unitário do plano XZ
+    pela câmera ortográfica, 30° dão uma caixa de tela em 2:1 **exato** (2,000:1), que é a
+    projeção dimétrica do Diablo 2, e o valor não depende do azimute. Isométrico
+    verdadeiro (35,264°) dá 1,73:1 — outro visual. Hades é mais alto, 45–50°; por isso o
+    tooltip diz para subir a elevação em vez de existir um preset só para ele.
+    `lockScale` continua desligada pelo mesmo motivo dos outros presets: a trava é
+    absoluta em px/unidade e o preset não sabe o tamanho do modelo (o Fox tem 79 unidades,
+    um personagem de jogo costuma ter 1). Ligar a caixa no painel calibra no modelo atual.
+    Um teste projeta o tile e trava o 2:1 — se alguém mexer na elevação, a suíte falha.
 
 ## Testes
 
@@ -737,8 +752,8 @@ sidecar Aseprite, os blocos do GIF (`GIF89a`, um `NETSCAPE2.0`, `transparentInde
 delays em centésimos), o recorte de alpha de 1 bit (a sombra a 35 % some em vez de virar
 preto sólido), o pontilhado de Bayer (35 % de alpha → 96 de 256 pontos, com vazio e opaco
 intactos), o GIF com fundo sem nenhum quadro transparente e o bloco `shadow` do metadata, rig de luz,
-`disposeHierarchy` com geometria compartilhada, os quatro presets, a escala travada e a
-amostra estática.
+`disposeHierarchy` com geometria compartilhada, os cinco presets (incluindo a verificação
+de que 30° projetam um tile do chão em 2:1 exato), a escala travada e a amostra estática.
 
 Lint (o CI roda exatamente isto):
 

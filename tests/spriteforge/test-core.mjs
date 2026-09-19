@@ -540,7 +540,45 @@ ok(core.presetSettings('default').cell === core.DEFAULT_SETTINGS.cell, 'preset d
 ok(core.presetSettings('inexistente').directions === core.DEFAULT_SETTINGS.directions, 'preset desconhecido cai no default');
 const mut = core.presetSettings('iso'); mut.cell = 999;
 ok(core.presetSettings('iso').cell === 128, 'presetSettings devolve cópia (mutar não vaza)');
-ok(Object.keys(core.PRESETS).length === 4, '4 presets: default, char2d, iso, props');
+ok(Object.keys(core.PRESETS).length === 5, '5 presets: default, char2d, iso, topdown, props');
+
+/* ---- top-down 2.5D (Diablo/Hades) ---- */
+const td = core.presetSettings('topdown');
+ok(td.elevation === 30, `preset top-down usa 30°: ${td.elevation}`);
+ok(td.pivot === 'base', 'pivot na BASE — em top-down a ordenação de profundidade é por Y, então a âncora tem que ficar nos pés');
+ok(td.directions === 8 && td.shadow === true, '8 direções e sombra ligada');
+ok(td.lockScale === false, 'não trava a escala (o preset não sabe o tamanho do seu modelo; a caixa do painel calibra)');
+// A diferença que justifica existir além do isométrico:
+ok(core.presetSettings('iso').pivot === 'center' && td.pivot === 'base',
+  'top-down difere do isométrico justamente no pivot (centro x pés)');
+// Ancorar nos pés vs no centro, em pixels, para o valor não ficar abstrato:
+const ptBase = core.pivotPoint('base'), ptCentro = core.pivotPoint('center');
+// Exato, não arredondado: a margem vem do SCALE_FIX, então (1-0.93)*128 = 8.96px.
+const pxBase = (1 - ptBase.y) * 128, pxCentro = (1 - ptCentro.y) * 128;
+ok(Math.abs(pxBase - PIV_MIN * 128) < 1e-9 && Math.abs(pxCentro - 64) < 1e-9,
+  `numa célula de 128px a âncora fica ${pxBase.toFixed(2)}px acima da base (pés) e não ${pxCentro.toFixed(0)}px (centro)`);
+ok(pxCentro - pxBase > 50,
+  `a diferença é ${(pxCentro - pxBase).toFixed(2)}px — meio corpo de flutuação, que é o que quebra a ordenação por Y`);
+
+/* ---- 30° é a projeção dimétrica 2:1 do Diablo (medido, não opinado) ----
+ * Projeta um tile quadrado unitário do plano XZ pela câmera ortográfica e mede a
+ * caixa na tela. Trava o ângulo: se alguém mexer na elevação do preset, isto falha. */
+const tileRatio = (elevDeg, azDeg) => {
+  const cam = core.createOrthoCamera({
+    half: 1, center: new THREE.Vector3(0, 0, 0),
+    elevationDeg: elevDeg, azimuthRad: THREE.MathUtils.degToRad(azDeg)
+  });
+  cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+  const pts = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]
+    .map(([x, z]) => new THREE.Vector3(x, 0, z).project(cam));
+  const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+  return (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys));
+};
+ok(Math.abs(tileRatio(30, 0) - 2) < 1e-6, `30° dá tile 2:1 exato no azimute 0: ${tileRatio(30, 0).toFixed(6)}`);
+ok(Math.abs(tileRatio(30, 45) - 2) < 1e-6, `e também a 45° — o ratio não depende do azimute: ${tileRatio(30, 45).toFixed(6)}`);
+ok(Math.abs(tileRatio(35.264, 0) - Math.sqrt(3)) < 1e-3,
+  `isométrico verdadeiro (35,264°) dá 1,73:1, não 2:1: ${tileRatio(35.264, 0).toFixed(4)}`);
+ok(tileRatio(50, 0) < tileRatio(30, 0), 'subir a elevação (Hades) comprime o tile — por isso é outro visual, não outro preset');
 
 /* ---------------- escala travada ---------------- */
 approx(core.lockedHalf(128, 8), 8, 1e-12, 'trava a 8 px/un: half 8 (janela de 16 unidades)');
