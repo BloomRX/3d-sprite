@@ -77,6 +77,19 @@ def redact(text: str) -> str:
     return ASSIGN_RE.sub(lambda m: m.group(0)[:m.start(2)-m.start()] + "[CREDENCIAL-OCULTA]" + m.group(0)[m.end(2)-m.start():], text)
 
 
+def normalize_interpreter(argv):
+    """Troca `python3`/`python` pelo interpretador que está rodando este script.
+
+    No Windows `python3` não existe — é o alias da Microsoft Store, que responde
+    "Python was not found" e derruba o `validate --full`. O devkit.json continua
+    legível com `python3`; a tradução acontece aqui, na hora de executar.
+    """
+    argv = [str(x) for x in argv]
+    if argv and argv[0].lower() in ("python3", "python", "py"):
+        return [sys.executable, *argv[1:]]
+    return argv
+
+
 def run(args, cwd=None, check=True, capture=False, input_text=None, env_overrides=None):
     args = [str(x) for x in args]
     env = os.environ.copy()
@@ -433,6 +446,7 @@ def run_full_tests(project):
     commands = configured_full_tests()
     if commands is not None:
         for argv in commands:
+            argv = normalize_interpreter(argv)
             print(f"[full] {' '.join(argv)}")
             run(argv, cwd=project); count += 1
         return count

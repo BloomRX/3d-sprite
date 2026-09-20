@@ -1,0 +1,9 @@
+Salve seus projetos do SpriteForge aqui (.spriteforge.json).
+
+O conteúdo desta pasta está no .gitignore: só este LEIA-ME é versionado.
+Nada do que você salvar aqui vai para o Git por engano.
+
+Como salvar:
+  1. Ajuste as opções do jeito que quiser.
+  2. Clique em "Salvar projeto" e escolha esta pasta.
+  3. Da próxima vez, "Abrir projeto" e aponte para o arquivo.

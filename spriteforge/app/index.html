@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpriteForge Web — spritesheet 8-direcional com animação</title>
+<style>
+  /* ============================================================
+     Tokens de design. Superfícies em camadas: cada nível um pouco
+     mais claro, para o olho ler profundidade sem depender só de borda.
+     ============================================================ */
+  :root{
+    --bg:#0e1014; --bg2:#12151b;
+    --panel:#171a21; --panel2:#1c2028; --raise:#222732; --raise2:#2a303c;
+    --line:#2a303b; --line2:#353d4b;
+    --fg:#e7ecf3; --mut:#8e99a9; --mut2:#6d7789;
+    --acc:#5e8bff; --acc2:#9b6bff; --acc-ink:#05070c; --acc-soft:rgba(94,139,255,.14);
+    --ok:#3ddc97; --warn:#f5a524; --err:#ff5f56;
+    --r1:7px; --r2:10px; --r3:14px;
+    --sh1:0 1px 2px rgba(0,0,0,.35);
+    --sh2:0 6px 20px rgba(0,0,0,.42);
+    --sh3:0 20px 55px rgba(0,0,0,.58);
+    --ring:0 0 0 3px rgba(94,139,255,.30);
+    --aside:336px;
+    --checker:conic-gradient(from 90deg at 50% 50%, #262b33 0 25%, #1e222a 0 50%, #262b33 0 75%, #1e222a 0);
+    --ease:cubic-bezier(.4,0,.2,1);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    /* dois brilhos fracos dão profundidade sem virar ruído visual */
+    background:
+      radial-gradient(1100px 560px at 80% -12%, rgba(94,139,255,.11), transparent 62%),
+      radial-gradient(880px 480px at 2% 112%, rgba(155,107,255,.08), transparent 60%),
+      var(--bg);
+    color:var(--fg);
+    font:13.5px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  ::selection{background:rgba(94,139,255,.32)}
+
+  /* foco visível em tudo que recebe teclado — sem isto o redesign perderia
+     acessibilidade, já que :focus{outline:none} é tentador */
+  :where(button, select, input, a, summary):focus-visible{
+    outline:none; box-shadow:var(--ring);
+  }
+
+  /* ---------- topo ---------- */
+  header{
+    display:flex; align-items:center; gap:10px; padding:9px 14px;
+    background:linear-gradient(180deg, rgba(28,32,40,.92), rgba(20,23,30,.88));
+    backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    border-bottom:1px solid var(--line); flex:0 0 auto; flex-wrap:wrap;
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset, var(--sh1);
+  }
+  header h1{font-size:14.5px; margin:0; letter-spacing:-.1px; white-space:nowrap; font-weight:650}
+  header h1 span{
+    background:linear-gradient(120deg, var(--acc), var(--acc2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header .spacer{flex:1 1 40px}
+  main{flex:1 1 auto; display:flex; min-height:0}
+
+  /* ---------- painel de controles ---------- */
+  aside{
+    flex:0 0 var(--aside); overflow-y:auto; overflow-x:hidden;
+    background:linear-gradient(180deg, var(--panel), var(--bg2));
+    border-right:1px solid var(--line); padding:12px 13px 32px 12px;
+    /* a barra de rolagem do Windows caía em cima das caixinhas de número: reserva o
+       vão de uma vez (não sobrepõe conteúdo) e usa uma barra fina */
+    scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--line2) transparent;
+  }
+  aside::-webkit-scrollbar{width:10px}
+  aside::-webkit-scrollbar-track{background:transparent}
+  aside::-webkit-scrollbar-thumb{
+    background:var(--line2); border:3px solid transparent;
+    background-clip:padding-box; border-radius:99px;
+  }
+  aside::-webkit-scrollbar-thumb:hover{background:#47505f; background-clip:padding-box}
+
+  .row{display:flex; gap:9px; align-items:center; margin:7px 0}
+  /* .row tem display:flex, que ganha do [hidden] do user agent: sem esta regra o
+     atributo hidden não esconderia nada. */
+  .row[hidden]{display:none}
+  .row.wrap{flex-wrap:wrap; gap:7px}
+  .row > label:first-child{
+    flex:0 0 74px; color:var(--mut); font-size:12.5px; font-weight:500;
+  }
+  .row.tight > label:first-child{flex:0 0 58px}
+  /* realce fraco ao mirar uma linha: ajuda a achar o controle certo num painel
+     com 30+ opções, sem virar ruído */
+  .row:hover > label:first-child{color:var(--fg)}
+  label{color:var(--mut)}
+
+  fieldset{
+    border:1px solid var(--line); border-radius:var(--r2); margin:0 0 12px; padding:11px 11px 9px;
+    background:linear-gradient(180deg, var(--panel2), rgba(23,26,33,.6));
+    box-shadow:var(--sh1), 0 1px 0 rgba(255,255,255,.025) inset;
+  }
+  legend{
+    color:var(--fg); font-size:10.5px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.09em; padding:3px 8px;
+    background:linear-gradient(120deg, rgba(94,139,255,.16), rgba(155,107,255,.14));
+    border:1px solid rgba(94,139,255,.22); border-radius:99px;
+  }
+
+  /* ---------- controles ---------- */
+  button, select, input[type=file]::file-selector-button{
+    background:linear-gradient(180deg, var(--raise), var(--panel2));
+    color:var(--fg); border:1px solid var(--line2);
+    border-radius:var(--r1); padding:6px 11px; cursor:pointer; font:inherit; font-size:12.5px;
+    box-shadow:var(--sh1), 0 1px 0 rgba(255,255,255,.035) inset;
+    transition:background .16s var(--ease), border-color .16s var(--ease),
+               transform .12s var(--ease), box-shadow .16s var(--ease);
+  }
+  button:hover{background:linear-gradient(180deg, var(--raise2), var(--raise)); border-color:#454f60}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.4; cursor:not-allowed; transform:none; box-shadow:none}
+  button.primary{
+    background:linear-gradient(120deg, var(--acc), var(--acc2));
+    border-color:transparent; color:var(--acc-ink); font-weight:700;
+    box-shadow:0 4px 14px rgba(94,139,255,.32), 0 1px 0 rgba(255,255,255,.22) inset;
+  }
+  button.primary:hover{
+    background:linear-gradient(120deg, #6f99ff, #a87bff);
+    box-shadow:0 6px 20px rgba(94,139,255,.42), 0 1px 0 rgba(255,255,255,.26) inset;
+  }
+  button.primary:disabled{box-shadow:none}
+  button.danger{
+    background:linear-gradient(180deg, #5c2530, #401a22);
+    border-color:#823744; color:#ffcfd0;
+  }
+  button.danger:hover{background:linear-gradient(180deg, #6e2c39, #4b1f28); border-color:#9c4452}
+  button.mini{padding:4px 9px; font-size:11.5px}
+  button.preset[aria-pressed="true"], button.preset.on{
+    background:linear-gradient(120deg, var(--acc), var(--acc2));
+    border-color:transparent; color:var(--acc-ink); font-weight:700;
+    box-shadow:0 3px 12px rgba(94,139,255,.3);
+  }
+  select, input[type=number]{
+    background-color:var(--raise); color:var(--fg);
+    border:1px solid var(--line2); border-radius:var(--r1); padding:5px 8px; font:inherit; font-size:12.5px;
+    transition:border-color .16s var(--ease), box-shadow .16s var(--ease);
+  }
+  select{
+    flex:1 1 auto; min-width:0; appearance:none; -webkit-appearance:none;
+    padding-right:26px;
+    background-image:url('data:image/svg+xml;utf8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6"%3E%3Cpath d="M1 1l4 4 4-4" fill="none" stroke="%238e99a9" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/%3E%3C/svg%3E');
+    background-repeat:no-repeat; background-position:right 9px center;
+  }
+  select:hover, input[type=number]:hover{border-color:#47505f}
+  input[type=range]{flex:1 1 auto; min-width:60px; appearance:none; -webkit-appearance:none; background:transparent; cursor:pointer; height:18px; margin:0}
+  input[type=range]::-webkit-slider-runnable-track{
+    height:4px; border-radius:99px;
+    background:linear-gradient(90deg, var(--line2), #2e3542);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:14px; height:14px; margin-top:-5px; border-radius:50%;
+    background:#f2f5f9; border:2px solid var(--acc);
+    box-shadow:0 1px 4px rgba(0,0,0,.5);
+    transition:transform .13s var(--ease), box-shadow .13s var(--ease);
+  }
+  input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.16)}
+  input[type=range]:active::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(94,139,255,.2)}
+  input[type=range]::-moz-range-track{height:4px; border-radius:99px; background:#2e3542}
+  input[type=range]::-moz-range-thumb{
+    width:12px; height:12px; border-radius:50%; background:#f2f5f9;
+    border:2px solid var(--acc); box-shadow:0 1px 4px rgba(0,0,0,.5);
+  }
+  input[type=range]:focus-visible{box-shadow:none}
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:var(--ring)}
+  input[type=range]:hover::-webkit-slider-runnable-track{background:var(--acc-soft)}
+
+  /* caixa de seleção desenhada à mão: a nativa destoa do tema escuro */
+  input[type=checkbox]{
+    appearance:none; -webkit-appearance:none; flex:0 0 17px;
+    width:17px; height:17px; margin:0; border-radius:5px; cursor:pointer;
+    border:1.5px solid var(--line2); background:var(--raise); position:relative;
+    transition:background .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+  }
+  input[type=checkbox]:hover{border-color:#5b6577}
+  input[type=checkbox]:active{transform:scale(.94)}
+  input[type=checkbox]:checked{
+    background:linear-gradient(135deg, var(--acc), var(--acc2)); border-color:transparent;
+  }
+  input[type=checkbox]:checked::after{
+    content:''; position:absolute; left:5px; top:1.5px; width:4px; height:8px;
+    border:solid #fff; border-width:0 2px 2px 0; transform:rotate(42deg);
+  }
+  .val{
+    color:var(--fg); font-variant-numeric:tabular-nums; flex:0 0 66px; width:66px; min-width:0;
+    text-align:right; font-size:12px; padding:4px 6px; background-color:var(--raise);
+  }
+
+  /* ---------- palco com abas ---------- */
+  section.stage{flex:1 1 auto; display:flex; flex-direction:column; min-width:0}
+  nav.tabs{
+    flex:0 0 auto; display:flex; gap:7px; align-items:center; padding:8px 12px;
+    background:linear-gradient(180deg, rgba(28,32,40,.7), rgba(18,21,27,.7));
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  nav.tabs button[aria-selected="true"]{
+    background:linear-gradient(120deg, var(--acc), var(--acc2));
+    border-color:transparent; color:var(--acc-ink); font-weight:700;
+    box-shadow:0 3px 12px rgba(94,139,255,.3);
+  }
+  nav.tabs .spacer{flex:1}
+  #progressWrap{display:none; flex:1 1 180px; min-width:120px}
+  #progressWrap.on{display:block}
+  #progressTrack{
+    height:6px; background:var(--raise); border-radius:99px; overflow:hidden;
+    box-shadow:0 0 0 1px var(--line) inset;
+  }
+  #progressBar{
+    height:100%; width:0; border-radius:99px;
+    background:linear-gradient(90deg, var(--acc), var(--acc2));
+    box-shadow:0 0 10px rgba(94,139,255,.55);
+    transition:width .08s linear;
+  }
+  #progressLabel{color:var(--mut); font-size:11px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .pane{flex:1 1 auto; min-height:0; overflow:auto; display:none}
+  .pane.on{display:block}
+  #viewPane{overflow:hidden; display:none}
+  #viewPane.on{display:flex}
+  #resultPane{padding:14px; background:var(--bg)}
+
+  #viewportWrap{
+    position:relative; flex:1 1 auto; min-height:0; overflow:hidden;
+    background-image:var(--checker); background-size:20px 20px;
+  }
+  #viewport{display:block; width:100%; height:100%; touch-action:none}
+  .badge{
+    position:absolute; left:10px; top:10px; padding:4px 9px; border-radius:99px;
+    background:rgba(10,13,17,.72); color:var(--mut); font-size:11px; pointer-events:none;
+    border:1px solid var(--line); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  }
+  #btnReframe{
+    position:absolute; right:12px; top:12px; z-index:6;
+    background:rgba(20,25,32,.82); border:1px solid var(--line2); color:var(--fg);
+    border-radius:99px; padding:5px 12px; font:inherit; font-size:11px; cursor:pointer;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    transition:border-color .16s var(--ease), background .16s var(--ease);
+  }
+  #btnReframe:hover{border-color:var(--acc); background:rgba(94,139,255,.16)}
+  #orbitHint{
+    position:absolute; left:12px; bottom:12px; z-index:6; pointer-events:none;
+    color:var(--mut); font-size:11px; background:rgba(20,25,32,.62);
+    padding:4px 9px; border-radius:99px; border:1px solid var(--line);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  }
+  #dropHint{
+    position:absolute; inset:0; display:none; place-items:center; z-index:5;
+    background:rgba(10,13,17,.86); border:2px dashed var(--acc); color:var(--acc);
+    font-size:15px; pointer-events:none; text-align:center;
+    backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+  }
+  body.dragging #dropHint{display:grid}
+  #loadError{
+    display:none; position:absolute; left:10px; right:10px; bottom:10px; z-index:6;
+    background:linear-gradient(180deg, #3d1519, #2c0f13);
+    border:1px solid #8d3a3a; color:#ffd7d7;
+    border-radius:var(--r2); padding:10px 12px; font-size:12px; line-height:1.45;
+    box-shadow:var(--sh2);
+  }
+
+  /* ---------- resultados ---------- */
+  .sheetBox{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start}
+  .canvasFrame{
+    background-image:var(--checker); background-size:16px 16px;
+    border:1px solid var(--line); border-radius:var(--r2); padding:3px; max-width:100%;
+    box-shadow:var(--sh2);
+  }
+  canvas.out{image-rendering:pixelated; max-width:100%; height:auto; display:block; border-radius:8px}
+  /* Player: caixa FIXA. O zoom é uma lupa desenhada dentro dela, então mudar o
+     zoom nunca reflowa o layout (era o bug relatado). */
+  #playerFrame{
+    width:256px; height:256px; flex:0 0 auto; display:flex;
+    border-radius:var(--r2); overflow:hidden;
+  }
+  #playerCanvas{width:100%; height:100%; image-rendering:pixelated; display:block}
+
+  .gifItem{display:inline-block; margin:5px 8px 0 0; text-align:center}
+  .gifGroup{
+    flex:0 0 100%; color:var(--mut); font-size:11px; margin-top:10px;
+    letter-spacing:.05em; text-transform:uppercase; font-weight:650;
+  }
+  .gifItem figcaption{color:var(--mut2); font-size:10px}
+  .gifItem img{
+    image-rendering:pixelated;
+    background-image:var(--checker); background-size:12px 12px;
+    border:1px solid var(--line); border-radius:var(--r1);
+  }
+
+  #status{
+    flex:0 0 auto; padding:6px 14px; background:rgba(8,10,13,.9);
+    border-top:1px solid var(--line);
+    color:var(--mut); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  #status.err{color:var(--err)} #status.ok{color:var(--ok)}
+  code{
+    background:var(--bg2); border:1px solid var(--line);
+    padding:1px 5px; border-radius:5px; font-size:11.5px;
+  }
+  .hint{color:var(--mut); font-size:11.5px; line-height:1.5}
+  #fileWarning{
+    display:none; margin:0; padding:16px 20px;
+    background:linear-gradient(180deg, #3d2c10, #2b1f0b);
+    border-bottom:1px solid var(--warn); color:#ffe6b8; font-size:13px; line-height:1.55;
+  }
+  #fileWarning code{background:#221803; color:#ffd27a; border-color:#5c4517}
+  #fileWarning b{color:#fff}
+
+  /* ---------- aviso de download: clicou, algo aconteceu — e diz PARA ONDE foi ---------- */
+  #toast{
+    position:fixed; left:50%; bottom:24px; transform:translate(-50%, 14px) scale(.97);
+    max-width:min(560px, calc(100vw - 32px)); z-index:40;
+    background:linear-gradient(180deg, #171b22, #11141a);
+    border:1px solid var(--line2); border-left:3px solid var(--acc);
+    border-radius:var(--r2); padding:11px 15px; color:var(--fg); font-size:12.5px;
+    box-shadow:var(--sh3);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    opacity:0; pointer-events:none;
+    transition:opacity .18s var(--ease), transform .18s var(--ease);
+  }
+  #toast.on{opacity:1; transform:translate(-50%, 0) scale(1)}
+  #toast.err{border-left-color:var(--err)}
+  #toast b{color:var(--acc)}
+  #toast.err b{color:#ff9a94}
+
+  /* ---------- diagnóstico ---------- */
+  #diagPanel{
+    display:none; position:fixed; right:16px; top:56px; width:min(520px, calc(100vw - 32px));
+    max-height:70vh; overflow:auto; z-index:20;
+    background:linear-gradient(180deg, #161a21, #101319);
+    border:1px solid var(--line2); border-radius:var(--r3); padding:13px;
+    box-shadow:var(--sh3);
+    scrollbar-width:thin; scrollbar-color:var(--line2) transparent;
+  }
+  #diagPanel.on{display:block}
+  #diagBody{
+    font:11px/1.55 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+    white-space:pre-wrap; word-break:break-word;
+    color:#c4d2e0; background:#0a0d11; border:1px solid var(--line);
+    border-radius:var(--r1); padding:10px;
+  }
+
+  /* ---------- quem preferir menos movimento ---------- */
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{
+      transition-duration:.01ms !important; animation-duration:.01ms !important;
+      animation-iteration-count:1 !important;
+    }
+  }
+</style>
+</head>
+<body>
+<p id="fileWarning">
+  <b>Aberto por <code>file://</code> — o app não funciona assim.</b><br>
+  O navegador bloqueia módulos ES em <code>file://</code>, então nada desta página responde.
+  Rode o servidor local e use <b>http://localhost</b>:<br>
+  Windows: duplo clique em <code>SpriteForge.bat</code> (na raiz do repositório).
+  Linux/macOS: <code>./SpriteForge.sh</code>.
+  Manual: <code>py -m http.server 8080 --directory spriteforge\app</code>
+</p>
+
+<header>
+  <h1>Sprite<span>Forge</span> Web</h1>
+  <span class="hint" id="modelInfo">nenhum modelo carregado — .glb .gltf .obj .fbx .stl .ply</span>
+  <div class="spacer"></div>
+  <input type="file" id="fileInput" multiple hidden>
+  <button id="btnOpen">Abrir modelo</button>
+  <button id="btnSample">Exemplo (Fox)</button>
+  <button id="btnSampleStatic" title="OBJ sem animação: 1 frame por direção">Exemplo estático</button>
+  <button id="btnPastaSaida" title="Sem pasta escolhida: os arquivos vão para a pasta de downloads e salvar projeto abre um diálogo. Clique e escolha a pasta do app — as exportações passam a sair em saida/ e os projetos em projetos/, sem perguntar.">Pasta do app: não escolhida</button>
+  <button id="btnDiag" title="Ambiente, limites da GPU e último erro">Diagnóstico</button>
+  <select id="selIdioma" title="Idioma / Language" aria-label="Idioma / Language" style="flex:0 0 auto">
+    <option value="pt-BR" selected>🇧🇷 Português</option>
+    <option value="en">🇺🇸 English</option>
+  </select>
+</header>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="diagPanel">
+  <div class="row">
+    <strong style="flex:1">Diagnóstico</strong>
+    <button id="btnCopyDiag" class="mini">copiar</button>
+    <button id="btnCloseDiag" class="mini">fechar</button>
+  </div>
+  <div id="diagBody">—</div>
+  <div class="hint">Cole isto aqui se algo falhar: ele diz o que a GPU suporta e qual foi o último erro.</div>
+  <div class="row wrap" style="margin-top:8px">
+    <strong style="flex:1">Relatório da sessão</strong>
+    <span class="hint" id="logCount">—</span>
+  </div>
+  <div class="row wrap">
+    <button id="btnLogTxt" class="mini" title="Relatório legível: ambiente, linha do tempo e o que você não chegou a usar">baixar .txt</button>
+    <button id="btnLogJson" class="mini" title="Os mesmos dados em JSON, para analisar">baixar .json</button>
+    <button id="btnLogLimpar" class="mini" title="Apaga a sessão gravada e começa do zero">limpar</button>
+  </div>
+  <div class="hint">Lista cada ação em ordem, quanto tempo levou, e <b>o que nunca foi usado</b> — é isso que mostra o que ainda falta testar. A sessão sobrevive a recarregar a página.</div>
+</div>
+
+<main>
+  <aside>
+    <fieldset>
+      <legend>Predefinições</legend>
+      <div class="row wrap">
+        <button class="preset mini" id="presetDefault" data-preset="default">Padrão</button>
+        <button class="preset mini" id="presetChar" data-preset="char2d">Personagem 2D</button>
+        <button class="preset mini" id="presetIso" data-preset="iso">Isométrico</button>
+        <button class="preset mini" id="presetTopdown" data-preset="topdown" title="Top-down 2.5D estilo Diablo/Hades: 30° dão tile do chão em 2:1 exato e a âncora fica nos pés, que é o que a ordenação de profundidade por Y precisa. Hades é mais alto — suba a elevação para 45–50°.">Top-down 2.5D</button>
+        <button class="preset mini" id="presetProps" data-preset="props">Itens / props</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Projeto</legend>
+      <div class="row wrap">
+        <button class="mini" id="btnSaveProject" title="Salva todas as opções num arquivo .spriteforge.json">Salvar projeto</button>
+        <button class="mini" id="btnOpenProject" title="Carrega as opções de um .spriteforge.json">Abrir projeto</button>
+        <input type="file" id="projectInput" accept=".json,.spriteforge.json,application/json" hidden>
+      </div>
+      <div class="hint">Só as opções são salvas — o modelo não vai junto. Salve na pasta <code>projetos/</code> do app; ela está no <code>.gitignore</code>.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Animação</legend>
+      <div class="row"><label for="clipSelect">Clip</label><select id="clipSelect"><option value="-1">— sem animação —</option></select></div>
+      <div class="row tight">
+        <button id="btnPlay">Play</button>
+        <input type="range" id="scrub" min="0" max="1" step="0.0001" value="0">
+        <span class="val" id="scrubVal">0.00s</span>
+      </div>
+      <div class="row"><input type="checkbox" id="chkLoopPerfect" checked><label for="chkLoopPerfect">Loop perfeito (descarta o último frame)</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Câmera e enquadramento</legend>
+      <div class="row"><label for="selDirections">Direções</label>
+        <select id="selDirections"><option value="4">4</option><option value="8" selected>8</option><option value="16">16</option></select>
+      </div>
+      <div class="row"><label for="rngElevation">Elevação</label><input type="range" id="rngElevation" min="-10" max="89" step="1" value="18"><input type="number" class="val" id="elevationVal" min="-10" max="89" step="1" value="18" title="graus — digite ou arraste"></div>
+      <div class="row"><label for="rngAzimuth">Frente em</label><input type="range" id="rngAzimuth" min="0" max="359" step="1" value="0"><input type="number" class="val" id="azimuthVal" min="0" max="359" step="1" value="0" title="graus — onde fica a frente do modelo"></div>
+      <div class="row"><label for="selPivot">Pivot</label>
+        <select id="selPivot">
+          <option value="center" selected>centro</option>
+          <option value="base">base (pés)</option>
+          <option value="top">topo</option>
+          <option value="custom">personalizado…</option>
+        </select>
+      </div>
+      <div class="row" id="rowPivotCustom" hidden>
+        <label for="pivotXVal">pivot x</label>
+        <input type="number" class="val" id="pivotXVal" min="0.07" max="0.93" step="0.01" value="0.5"
+               title="posição do alvo na célula, 0 = esquerda, 1 = direita">
+        <label for="pivotYVal">y</label>
+        <input type="number" class="val" id="pivotYVal" min="0.07" max="0.93" step="0.01" value="0.5"
+               title="posição do alvo na célula, 0 = topo, 1 = base">
+      </div>
+      <div class="row"><span class="hint">fora de 0.07–0.93 o modelo seria cortado, então o valor é preso nessa faixa</span></div>
+      <div class="row"><label for="rngFrames">Frames</label><input type="range" id="rngFrames" min="1" max="32" step="1" value="12"><input type="number" class="val" id="framesVal" min="1" step="1" value="12" title="quadros por direção — pode digitar além de 32"></div>
+      <div class="row"><label for="rngCell">Célula</label><input type="range" id="rngCell" min="16" max="512" step="8" value="128"><input type="number" class="val" id="cellVal" min="16" step="8" value="128" title="pixels — digite o valor que quiser, o slider só vai até 512"></div>
+      <div class="row"><label for="rngPadding">Padding</label><input type="range" id="rngPadding" min="0" max="8" step="1" value="0"><input type="number" class="val" id="paddingVal" min="0" step="1" value="0" title="pixels de vão entre células"></div>
+      <div class="row"><input type="checkbox" id="chkSsaa"><label for="chkSsaa">SSAA 2x (renderiza 2x e reduz)</label></div>
+      <div class="row"><input type="checkbox" id="chkLockScale"><label for="chkLockScale">Escala travada (px por unidade)</label></div>
+      <div class="row" id="rowScaleLock" hidden><label for="rngScaleLock">px/unid.</label><input type="range" id="rngScaleLock" min="0.05" max="64" step="0.05" value="8"><input type="number" class="val" id="scaleLockVal" min="0.05" step="0.05" value="8" title="pixels por unidade de mundo"></div>
+      <div class="row"><span class="hint">Trava absoluta: o mesmo modelo sai do mesmo tamanho em qualquer projeto. Ao ligar, o valor é calibrado no modelo atual para não cortar nada.</span></div>
+      <div class="row"><input type="checkbox" id="chkTurntable"><label for="chkTurntable">Turntable (girar a câmera)</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Luz e fundo</legend>
+      <div class="row"><label for="selBackground">Fundo</label>
+        <select id="selBackground">
+          <option value="transparent" selected>transparente</option>
+          <option value="white">branco</option>
+          <option value="dark">escuro</option>
+        </select>
+      </div>
+      <div class="row"><input type="checkbox" id="chkShadow" checked><label for="chkShadow">Sombra no chão</label></div>
+      <div class="row"><input type="checkbox" id="chkLightCamera"><label for="chkLightCamera">Luz presa à câmera (flat)</label></div>
+      <div class="row"><label for="rngLightAz">Luz (azim.)</label><input type="range" id="rngLightAz" min="0" max="359" step="1" value="34"><input type="number" class="val" id="lightAzVal" min="0" max="359" step="1" value="34" title="graus"></div>
+      <div class="row"><label for="rngLightInt">Luz (int.)</label><input type="range" id="rngLightInt" min="0" max="5" step="0.1" value="2.6"><input type="number" class="val" id="lightIntVal" min="0" step="0.1" value="2.6" title="intensidade da luz principal"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Gerar</legend>
+      <div class="row"><input type="checkbox" id="chkShadowLayer" checked><label for="chkShadowLayer">Camada de sombra separada</label></div>
+      <div class="row"><span class="hint">Segunda sheet, mesma grade, só com a sombra — para você ligar e desligar no jogo.</span></div>
+      <div class="row"><input type="checkbox" id="chkTrim"><label for="chkTrim">Compactar (trim)</label></div>
+      <div class="row"><span class="hint">Corta cada frame no que tem tinta e reempacota a folha — costuma economizar mais da metade. Sai um arquivo extra <code>_sheet_packed.png</code> com metadata próprio; a sheet em grade continua igual. Quebra o "grid slice" do Unity: importe pelo JSON.</span></div>
+      <div class="row"><button id="btnGenerate" class="primary" style="flex:1" disabled>Gerar spritesheet</button></div>
+      <div class="row"><button id="btnCancel" class="danger" style="flex:1" disabled>Cancelar</button></div>
+      <div class="hint">linhas = direções · colunas = frames</div>
+    </fieldset>
+  </aside>
+
+  <section class="stage">
+    <nav class="tabs">
+      <button id="tab3d" aria-selected="true">Viewport 3D</button>
+      <button id="tabResults" aria-selected="false">Sheet &amp; Player</button>
+      <div class="spacer"></div>
+      <div id="progressWrap">
+        <div id="progressTrack"><div id="progressBar"></div></div>
+        <div id="progressLabel">—</div>
+      </div>
+    </nav>
+
+    <div class="pane on" id="viewPane">
+      <div id="viewportWrap">
+        <canvas id="viewport"></canvas>
+        <button id="btnReframe" title="volta a câmera para o enquadramento automático">⟲ Reenquadrar</button>
+        <div id="orbitHint">arraste = girar · roda = zoom · botão direito = deslocar</div>
+        <div class="badge" id="viewBadge">arraste um modelo aqui</div>
+        <div id="dropHint">Solte o modelo (.glb, .gltf, .obj, .fbx, .stl, .ply)<br><span class="hint">.gltf com .bin/texturas: arraste todos juntos</span></div>
+        <div id="loadError"></div>
+      </div>
+    </div>
+
+    <div class="pane" id="resultPane">
+      <fieldset>
+        <legend>Sheet</legend>
+        <div class="sheetBox">
+          <div>
+            <div class="canvasFrame"><canvas id="sheetPreview" class="out"></canvas></div>
+            <div class="row wrap">
+              <input type="checkbox" id="chkGrid"><label for="chkGrid">grade</label>
+              <input type="checkbox" id="chkPivotMark" checked><label for="chkPivotMark" title="marca o ponto que a engine usa como âncora em cada célula">alvo do pivot</label>
+              <span class="hint" id="sheetInfo">gere uma sheet para ver aqui</span>
+            </div>
+          </div>
+          <div style="flex:1; min-width:240px">
+            <div class="row wrap">
+              <button id="dlZip" class="primary">Baixar tudo (.zip)</button>
+            </div>
+            <div class="row wrap">
+              <button id="dlSheet">sheet.png</button>
+              <button id="dlJson">metadata.json</button>
+              <button id="dlAseprite">.aseprite.json</button>
+            </div>
+            <div class="row">
+              <button id="dlShadow" style="flex:1" title="só a sombra do chão, na mesma grade da sheet">
+                ⬛ shadow.png — só a sombra, separada
+              </button>
+            </div>
+            <div class="row">
+              <button id="dlSheetShadow" style="flex:1" title="personagem + sombra num sprite só, com alpha de 8 bits e fundo transparente">
+                🎭 sheet+sombra.png — sprite único, sombra real
+              </button>
+            </div>
+            <div class="hint">Personagem e sombra num arquivo só, com a sombra de verdade a 35 %
+              de opacidade — é o que o GIF não consegue guardar (o alpha dele é de 1 bit).
+              A sombra acima e o botão abaixo são as mesmas sombras, separadas.</div>
+            <div class="hint">mesma grade da sheet: na engine, desenhe antes do sprite e esconda
+              esse nó para tirar a sombra. Também vai dentro do .zip.</div>
+            <div class="row" id="rowPacked" hidden>
+              <button id="dlPacked" style="flex:1" title="folha compactada: cada frame cortado no que tem tinta e reempacotado. Importe pelo JSON, não por grid slice.">
+                📦 sheet_packed.png + metadata
+              </button>
+            </div>
+            <div class="hint" id="packedInfo" hidden></div>
+            <div class="hint" id="jsonInfo"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Player</legend>
+        <div class="sheetBox">
+          <div class="canvasFrame" id="playerFrame"><canvas id="playerCanvas" class="out"></canvas></div>
+          <div style="flex:1; min-width:240px">
+            <div class="row wrap">
+              <button id="btnPlayerPlay">Pause</button>
+              <input type="checkbox" id="chkPlayerShadow" checked><label for="chkPlayerShadow">sombra</label>
+              <label for="playerDir">direção</label>
+              <select id="playerDir" style="flex:0 1 auto"></select>
+            </div>
+            <div class="row tight"><label for="rngFps">fps</label><input type="range" id="rngFps" min="1" max="60" step="1" value="12"><input type="number" class="val" id="fpsVal" min="1" step="1" value="12" title="quadros por segundo"></div>
+            <div class="row tight"><label for="rngZoom">zoom</label><input type="range" id="rngZoom" min="1" max="6" step="1" value="1"><input type="number" class="val" id="zoomVal" min="1" step="1" value="1" title="vezes"></div>
+            <div class="hint">zoom = lupa dentro da caixa fixa (não muda o layout)</div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>GIF por direção</legend>
+        <div class="row wrap">
+          <button id="btnGif">Gerar GIFs</button>
+          <label for="selGifBg">fundo</label>
+          <select id="selGifBg" style="flex:0 1 auto" title="GIF tem alpha de 1 bit: com fundo transparente a sombra some; com fundo ela é composta de verdade">
+            <option value="transparent">transparente (sem sombra)</option>
+            <option value="dither" selected>transparente + sombra pontilhada</option>
+            <option value="white">fundo branco (sombra real)</option>
+            <option value="dark">fundo escuro (sombra real)</option>
+          </select>
+          <label for="selShadowGif" title="como sai o GIF da sombra, que é um sprite à parte">GIF da sombra</label>
+          <select id="selShadowGif">
+            <option value="silhueta" selected>silhueta preta (transparência você põe no motor)</option>
+            <option value="pontilhado">pontilhada a 35%</option>
+          </select>
+          <label for="rngGifScale">escala</label>
+          <select id="rngGifScale" style="flex:0 1 auto">
+            <option value="1" selected>100%</option>
+            <option value="0.5">50%</option>
+            <option value="0.25">25%</option>
+          </select>
+          <span class="hint">GIF tem alpha de 1 bit: a sombra do personagem ou é composta num fundo, ou sai
+            pontilhada. A da sombra sai sempre transparente (silhueta preta é o que dá para
+            modular no motor) e é um sprite à parte, para colocar junto do personagem</span>
+        </div>
+        <div id="gifList" class="row wrap"></div>
+      </fieldset>
+    </div>
+  </section>
+</main>
+
+<div id="status">pronto</div>
+
+<script>
+  // Script clássico de propósito: sob file:// os módulos ES nem carregam, então
+  // é só aqui que dá para explicar por que a página parece morta.
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var aviso = document.getElementById('fileWarning');
+      if (aviso) aviso.style.display = 'block';
+      var controles = document.querySelectorAll('button, input, select');
+      for (var i = 0; i < controles.length; i++) controles[i].disabled = true;
+      var st = document.getElementById('status');
+      if (st) { st.textContent = 'aberto por file:// — rode SpriteForge.bat e use http://localhost'; st.className = 'err'; }
+    });
+  }
+</script>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

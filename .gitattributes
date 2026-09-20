@@ -1,0 +1,31 @@
+# Normaliza o fim de linha no repositório; cada checkout converte para o SO.
+* text=auto
+
+# Os launchers são executados pelo cmd.exe: precisam de CRLF de verdade.
+*.bat text eol=crlf
+*.sh  text eol=lf
+
+# Código e docs sempre com LF, inclusive no Windows.
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.py   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+
+# Bibliotecas de terceiros: não entram na estatística de linguagem nem no blame.
+spriteforge/app/vendor/** linguist-vendored
+spriteforge/app/libs/** linguist-vendored
+spriteforge/app/curves/** linguist-vendored
+spriteforge/app/utils/** linguist-vendored
+
+# Binários de verdade (sem diff textual, sem normalização de linha).
+*.glb binary
+*.gltf -text
+*.png binary
+*.gif binary
+*.zip binary
+*.fbx binary
+*.stl binary
+*.ply binary

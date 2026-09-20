@@ -1,0 +1,36 @@
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (o app em si não tem build; isto é só para ferramentas de apoio)
+node_modules/
+
+# Saídas geradas pelo app ao testar (sheets, zips, GIFs baixados)
+*.aseprite.json.tmp
+spriteforge-out/
+
+# Projetos salvos pelo usuário — conteúdo dele, nunca do repositório.
+# O LEIA-ME fica versionado para a pasta existir no clone.
+projetos/*
+!projetos/LEIA-ME.txt
+
+# Pasta de saída escolhida no app (sheets, GIFs, ZIP, projetos). Se você apontar
+# o app para uma pasta dentro do repositório, nada disso deve ser commitado.
+saida/*
+!saida/LEIA-ME.txt
+
+# Perfil da janela de app (--app): cache, cookies e preferências do navegador
+# embutido. Regenerável, específico da máquina.
+.perfil-app/
