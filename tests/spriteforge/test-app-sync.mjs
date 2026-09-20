@@ -130,9 +130,12 @@ const opcoesSrc = src.slice(iniOp, fimOp);
 if (!opcoesSrc.includes("alphaCut: modo === 'pontilhado'")) {
   console.log('FALHA: opcoesGif não foi extraído como esperado'); fail++;
 } else {
-  const rodar = (bg, modo) => new Function('el', 'core', 'GIF_BG', 'state',
+  // `sombra` é o estado da caixa "Sombra no chão". O stub antigo nem a tinha, e
+  // era isso que deixava o teste afirmar um `comSombra: true` fixo como se fosse
+  // o comportamento certo.
+  const rodar = (bg, modo, sombra = true) => new Function('el', 'core', 'GIF_BG', 'state',
     opcoesSrc + '; return opcoesGif();')(
-    { selGifBg: { value: bg }, selShadowGif: { value: modo } },
+    { selGifBg: { value: bg }, selShadowGif: { value: modo }, chkShadow: { checked: sombra } },
     { GIF_ALPHA_CUT: 128 }, { white: '#ffffff', dark: '#15181d' }, { result: { dirCount: 8 } }
   );
   let o = rodar('dither', 'silhueta');
@@ -146,8 +149,18 @@ if (!opcoesSrc.includes("alphaCut: modo === 'pontilhado'")) {
   o = rodar('transparent', 'pontilhado');
   ok(o.sombra.pontilhado === true && o.sombra.alphaCut === 128, 'sombra pontilhada usa Bayer com corte 128');
   ok(o.personagem.rotulo.includes('personagem') && o.sombra.rotulo.includes('sombra'), 'cada conjunto tem legenda própria');
-  ok(o.personagem.comSombra === true, 'o GIF do personagem recompõe a sombra por baixo (as opções de fundo continuam valendo)');
+  ok(o.personagem.comSombra === true, 'com a sombra ligada o GIF do personagem a recompõe por baixo');
   ok(o.sombra.comSombra === false, 'o GIF da sombra não se recompõe em si mesmo');
+
+  // O bug relatado: desmarcar "Sombra no chão" e gerar GIFs continuava saindo com
+  // sombra, porque comSombra era `true` fixo e a folha da sombra da geração
+  // anterior continuava viva no resultado.
+  const semSombra = rodar('dither', 'silhueta', false);
+  ok(semSombra.personagem.comSombra === false,
+    'desmarcar "Sombra no chão" faz o GIF do personagem sair SEM sombra (buildGifs só recompõe se comSombra)');
+  ok(semSombra.sombra.comSombra === false, 'o GIF da sombra nunca se recompõe, ligado ou desligado');
+  ok(semSombra.personagem.transparente === true && semSombra.personagem.alphaCut === 128,
+    'desligar a sombra não mexe em nada mais do GIF do personagem');
 }
 
 

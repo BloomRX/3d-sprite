@@ -1839,7 +1839,12 @@ function opcoesGif() {
       transparente: bg === 'transparent' || bg === 'dither',
       pontilhado: bg === 'dither',
       alphaCut: core.GIF_ALPHA_CUT,
-      comSombra: true,
+      // Respeita "Sombra no chão". Antes era `true` fixo, então desmarcar a
+      // sombra e clicar em Gerar GIFs recompunha a sombra do mesmo jeito — a
+      // folha da sombra continuava viva no resultado da geração anterior, e o
+      // usuário não tinha como obter um GIF sem sombra mantendo a camada
+      // separada. O toggle do player é outro, e continua sendo o dele.
+      comSombra: el.chkShadow.checked,
       fundo: GIF_BG[bg] || '#ffffff',
       rotulo: `GIFs do personagem — dir00…dir${String(state.result ? state.result.dirCount - 1 : 7).padStart(2, '0')}`
     },

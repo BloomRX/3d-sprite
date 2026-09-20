@@ -734,6 +734,16 @@ func _ready() -> void:
     tamanho errado (trim viraria escala) e não pular frame vazio. O terceiro só passou a ser
     pego depois de um caso de teste com `caixa: null` **e** destino presente — antes a
     guarda era código morto e o teste não a exercitava.
+54. **"Sombra no chão" vale para o GIF também.** `opcoesGif()` tinha `comSombra: true`
+    fixo, então desmarcar a sombra e clicar em **Gerar GIFs** recompunha a sombra do mesmo
+    jeito: a folha da sombra da geração anterior continuava viva em `state.result`, e
+    `buildGifs` recompõe sempre que `sombraSource && opcao.comSombra`. Não havia como obter
+    um GIF sem sombra mantendo a camada separada.
+    O teste existia e **travava o comportamento errado**: o stub de `el` nem incluía
+    `chkShadow`, então a função lia `undefined` e a asserção `comSombra === true` passava.
+    Um teste que não exercita a entrada que decide o comportamento não protege nada — foi o
+    segundo caso assim nesta rodada. O toggle de sombra do **player** é outro
+    (`chkPlayerShadow`) e continua sendo o dele.
 
 ## Testes
 
@@ -759,7 +769,7 @@ node --import ./tests/spriteforge/register-three.mjs tests/spriteforge/test-core
 node tests\spriteforge\test-app-sync.mjs
 ```
 
-`test-app-sync.mjs` (**58 asserções**) cobre a outra ponta — o que mora no `app.js` e não no
+`test-app-sync.mjs` (**61 asserções**) cobre a outra ponta — o que mora no `app.js` e não no
 núcleo. Como não há como abrir um navegador aqui, ele executa o **bloco real** do `app.js`,
 extraído do arquivo pelo texto (com balanceamento de chaves, não por `indexOf` de `}`), contra
 um DOM mínimo que imita o `<input type=range>` do navegador (clamp + encaixe no passo).
